@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 210 54% 20%;
+    --card: 0 0% 100%;
+    --card-foreground: 210 54% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 54% 20%;
+    --primary: 207 82% 43%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 174 56% 40%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 206 90% 97%;
+    --accent-foreground: 207 60% 26%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 88%;
+    --ring: 207 82% 43%;
+    --radius: 0.75rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+
+  ::selection {
+    @apply bg-brand-700 text-white;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-display tracking-tight;
+  }
+}
+
+@layer utilities {
+  .container-site {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+}
+
+/* Rich text content (blog / CMS) */
+.prose-cms {
+  @apply leading-relaxed text-slate-700;
+}
+.prose-cms h2 {
+  @apply mb-3 mt-8 text-2xl font-semibold text-navy-900;
+}
+.prose-cms h3 {
+  @apply mb-2 mt-6 text-xl font-semibold text-navy-900;
+}
+.prose-cms p {
+  @apply mb-4;
+}
+.prose-cms ul {
+  @apply mb-4 list-disc space-y-1 pl-5;
+}
+.prose-cms ol {
+  @apply mb-4 list-decimal space-y-1 pl-5;
+}
+.prose-cms a {
+  @apply font-medium text-brand-700 underline underline-offset-2;
+}
+.prose-cms blockquote {
+  @apply my-4 border-l-4 border-brand-300 bg-brand-50 px-4 py-2 italic text-slate-600;
+}
+
+/* Print: only render the targeted invoice, hide portal chrome/backgrounds */
+@media print {
+  body.printing-invoice * {
+    visibility: hidden;
+  }
+  body.printing-invoice #print-invoice,
+  body.printing-invoice #print-invoice * {
+    visibility: visible;
+  }
+  body.printing-invoice #print-invoice {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    max-width: 100%;
+    border: 0;
+    box-shadow: none;
+  }
+  body.printing-invoice {
+    background: #fff !important;
+  }
+}
