@@ -13,6 +13,7 @@ const doctorSchema = new mongoose.Schema(
     consultationTimings: { type: String, trim: true },
     available247: { type: Boolean, default: false },
     featured: { type: Boolean, default: false },
+    department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
     branches: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }],
     isActive: { type: Boolean, default: true },
     order: { type: Number, default: 0 },

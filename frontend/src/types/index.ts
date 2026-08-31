@@ -62,6 +62,7 @@ export interface Doctor {
   consultationTimings?: string;
   available247?: boolean;
   featured?: boolean;
+  department?: string | { _id: string; name: string } | null;
   branches: Branch[];
   isActive: boolean;
   order: number;
@@ -254,4 +255,90 @@ export interface ContentModuleMeta {
   description: string;
   icon: string;
   role: string[];
+}
+
+export interface PaymentMethod {
+  _id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  isActive: boolean;
+  order: number;
+}
+
+export interface Patient {
+  _id: string;
+  uhid: string;
+  name: string;
+  mobile: string;
+  age?: number;
+  gender: 'Male' | 'Female' | 'Other';
+  cH?: string;
+  fN?: string;
+  address?: string;
+  createdAt: string;
+  lastVisit?: Visit | null;
+  visitCount?: number;
+  outstanding?: number;
+}
+
+export interface VisitCharges {
+  opConsultation: number;
+  pharmacy: number;
+  lab: number;
+  otherCharges: number;
+  discount: number;
+  tax: number;
+  total: number;
+}
+
+export interface VisitPayment {
+  advanced: number;
+  method?: string | { _id: string; name: string } | null;
+  methodName?: string;
+  due: number;
+  status: 'Paid' | 'Partial' | 'Due';
+}
+
+export interface Visit {
+  _id: string;
+  patient: string | { _id: string; uhid: string; name: string; mobile: string; age?: number; gender?: string; cH?: string; fN?: string; address?: string };
+  uhid?: string;
+  visitDate: string;
+  visitType: 'New OP' | 'Follow-up';
+  branch?: { _id: string; name: string; address?: string; area?: string; city?: string; phone?: string } | null;
+  department?: { _id: string; name: string; slug?: string } | null;
+  doctor?: { _id: string; name: string; designation?: string } | null;
+  opNumber?: string;
+  concern?: string;
+  diagnosis?: string;
+  treatment?: string;
+  noOfDays: number;
+  notes?: string;
+  charges: VisitCharges;
+  payment: VisitPayment;
+  invoiceNumber?: string;
+  createdBy?: { _id: string; name: string } | null;
+  signature?: string;
+  createdAt: string;
+}
+
+export interface HomeVisit {
+  _id: string;
+  patient?: string | { _id: string; uhid: string; name: string; mobile: string } | null;
+  uhid?: string;
+  patientName: string;
+  diagnosis?: string;
+  location?: string;
+  timing?: string;
+  contact?: string;
+  attendance?: string;
+  reason?: string;
+  perSession: number;
+  advance: number;
+  due: number;
+  branch?: { _id: string; name: string } | null;
+  therapist?: string;
+  therapistSignature?: string;
+  createdAt: string;
 }

@@ -13,6 +13,7 @@ const Appointment = require('../../models/Appointment');
 const OpRegistration = require('../../models/OpRegistration');
 const Invoice = require('../../models/Invoice');
 const AboutImage = require('../../models/AboutImage');
+const PaymentMethod = require('../../models/PaymentMethod');
 const cloudinary = require('../../config/cloudinary');
 const { extractPublicId } = require('./uploadController');
 const ApiError = require('../../utils/ApiError');
@@ -82,6 +83,11 @@ const MODEL_REGISTRY = {
       { path: 'department', select: 'name' },
       { path: 'issuedBy', select: 'name' },
     ],
+  },
+  'payment-methods': {
+    model: PaymentMethod,
+    category: 'settings',
+    searchFields: ['name', 'description'],
   },
 };
 

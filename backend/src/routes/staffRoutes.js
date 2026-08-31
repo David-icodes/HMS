@@ -13,6 +13,22 @@ const ApiError = require('../utils/ApiError');
 const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const OpRegistration = require('../models/OpRegistration');
+const {
+  searchPatients,
+  createPatient,
+  addVisit,
+  listPatientVisits,
+  listVisits,
+  getVisit,
+  updateVisit,
+  generateVisitInvoice,
+  getPatient,
+  createHomeVisit,
+  listHomeVisits,
+  updateHomeVisit,
+  deleteHomeVisit,
+  listPaymentMethods,
+} = require('../controllers/admin/visitController');
 
 const router = express.Router();
 
@@ -21,6 +37,7 @@ router.use(sanitize);
 router.use(authorize('receptionist', 'admin', 'superAdmin'));
 
 router.get('/patients', listPatients);
+router.get('/payment-methods', listPaymentMethods);
 
 router.post('/op-registrations', asyncHandler(async (req, res) => {
   const { branch, department, name, mobile, age, gender, address, concern, preferredDate, amount, paymentMethod } = req.body;
@@ -50,6 +67,10 @@ router.post('/op-registrations', asyncHandler(async (req, res) => {
   res.status(201).json(new ApiResponse(201, { op }, 'Patient registered'));
 }));
 
+router.get('/patients/search', searchPatients);
+router.post('/patients', createPatient);
+router.get('/patients/:id/visits', listPatientVisits);
+router.get('/patients/:id/profile', getPatient);
 router.get('/patients/:id', asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid patient id');
   const op = await OpRegistration.findById(req.params.id)
@@ -58,6 +79,17 @@ router.get('/patients/:id', asyncHandler(async (req, res) => {
   if (!op) throw new ApiError(404, 'Patient not found');
   res.status(200).json(new ApiResponse(200, op));
 }));
+router.post('/patients/:id/visits', addVisit);
+
+router.get('/visits', listVisits);
+router.get('/visits/:id', getVisit);
+router.put('/visits/:id', updateVisit);
+router.post('/visits/:id/invoice', generateVisitInvoice);
+
+router.post('/home-visits', createHomeVisit);
+router.get('/home-visits', listHomeVisits);
+router.put('/home-visits/:id', updateHomeVisit);
+router.delete('/home-visits/:id', deleteHomeVisit);
 
 router.post('/patients/:id/invoice', generateInvoice);
 

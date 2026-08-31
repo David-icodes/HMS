@@ -3,13 +3,16 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Loader2, LogOut, LayoutDashboard, Users } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Users, ClipboardPlus, ListOrdered, Home } from 'lucide-react';
 import { useStaffAuth, fetchStaffMe, STAFF_ROLES } from '@/lib/staff-auth';
 
 function titleFor(pathname: string) {
   if (pathname === '/staff') return 'Dashboard';
   if (pathname.includes('/invoice')) return 'Invoice';
   if (pathname === '/staff/patients') return 'Patients';
+  if (pathname === '/staff/register') return 'New OP Registration';
+  if (pathname.startsWith('/staff/op-list')) return 'OP List';
+  if (pathname.startsWith('/staff/home-visits')) return 'Home Visits';
   return 'Staff Portal';
 }
 
@@ -74,13 +77,31 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
           <nav className="flex items-center gap-1 text-sm font-medium">
             <Link
               href="/staff"
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${isActive('/staff') && !pathname.startsWith('/staff/patients') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors ${isActive('/staff') && !pathname.startsWith('/staff/register') && !pathname.startsWith('/staff/op-list') && !pathname.startsWith('/staff/home-visits') && !pathname.startsWith('/staff/patients') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <LayoutDashboard className="h-4 w-4" /> Dashboard
             </Link>
             <Link
+              href="/staff/register"
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/register') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <ClipboardPlus className="h-4 w-4" /> New OP
+            </Link>
+            <Link
+              href="/staff/op-list"
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/op-list') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <ListOrdered className="h-4 w-4" /> OP List
+            </Link>
+            <Link
+              href="/staff/home-visits"
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/home-visits') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Home className="h-4 w-4" /> Home Visits
+            </Link>
+            <Link
               href="/staff/patients"
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${isActive('/staff/patients') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/patients') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <Users className="h-4 w-4" /> Patients
             </Link>
