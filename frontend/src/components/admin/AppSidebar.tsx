@@ -25,6 +25,8 @@ import {
   LogOut,
   X,
   Server,
+  IndianRupee,
+  ChartColumn,
 } from 'lucide-react';
 import { useAuth } from '@/lib/admin-auth';
 
@@ -33,7 +35,7 @@ interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
-  category: 'dashboard' | 'content' | 'appointments' | 'op' | 'users' | 'activity' | 'settings';
+  category: 'dashboard' | 'content' | 'appointments' | 'op' | 'analytics' | 'users' | 'activity' | 'settings';
 }
 
 interface NavGroup {
@@ -67,6 +69,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    heading: 'Reports & Analytics',
+    items: [
+      { key: 'revenue', label: 'Revenue', href: '/admin/revenue', icon: IndianRupee, category: 'analytics' },
+      { key: 'branch-reports', label: 'Branch Reports', href: '/admin/branch-reports', icon: ChartColumn, category: 'analytics' },
+    ],
+  },
+  {
     heading: 'Content',
     items: [
       { key: 'heroes', label: 'Hero Slides', href: '/admin/heroes', icon: Sparkles, category: 'content' },
@@ -87,8 +96,8 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 const ROLE_CATEGORIES: Record<string, string[]> = {
-  superAdmin: ['content', 'appointments', 'op', 'settings', 'users', 'activity'],
-  admin: ['content', 'appointments', 'op', 'settings', 'users', 'activity'],
+  superAdmin: ['content', 'appointments', 'op', 'analytics', 'settings', 'users', 'activity'],
+  admin: ['content', 'appointments', 'op', 'analytics', 'settings', 'users', 'activity'],
   contentEditor: ['content'],
   receptionist: ['appointments', 'op'],
 };

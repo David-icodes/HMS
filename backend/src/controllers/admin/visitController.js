@@ -289,7 +289,7 @@ const generateVisitInvoice = asyncHandler(async (req, res) => {
     tax: tax || 0,
     total,
     amountPaid: visit.payment.advanced,
-    paymentMethod: methodName ? String(methodName).toLowerCase().replace(/\s+/g, '-') : 'other',
+    paymentMethod: methodName || (visit.payment.method && visit.payment.method.name) || 'pending',
     status: visit.payment.status === 'Paid' ? 'paid' : 'issued',
     issuedBy: req.user._id,
     notes: visit.diagnosis || visit.concern || undefined,
@@ -342,26 +342,19 @@ const getPatient = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, { type: 'op', op }));
 });
 
-// ---------- Home Visits ----------
+// ---------- Home Visits (independent of OP / UHID workflow) ----------
 const createHomeVisit = asyncHandler(async (req, res) => {
   const b = req.body;
   if (!b.patientName) throw new ApiError(400, 'Patient name is required');
-  const patient = b.uhid
-    ? await Patient.findOne({ uhid: b.uhid })
-    : b.mobile
-      ? await Patient.findOne({ mobile: b.mobile })
-      : null;
   const perSession = Math.max(0, Number(b.perSession) || 0);
   const advance = Math.max(0, Number(b.advance) || 0);
   const due = Math.max(0, perSession - advance);
   const hv = await HomeVisit.create({
-    patient: patient ? patient._id : undefined,
-    uhid: patient ? patient.uhid : b.uhid || undefined,
     patientName: b.patientName,
     diagnosis: b.diagnosis,
     location: b.location,
     timing: b.timing,
-    contact: b.contact || patient?.mobile,
+    contact: b.contact,
     attendance: b.attendance,
     reason: b.reason,
     perSession,
@@ -369,10 +362,9 @@ const createHomeVisit = asyncHandler(async (req, res) => {
     due,
     branch: b.branch || undefined,
     therapist: b.therapist,
-    therapistSignature: b.therapistSignature,
     createdBy: req.user._id,
   });
-  const full = await HomeVisit.findById(hv._id).populate('branch', 'name').populate('patient', 'uhid name mobile');
+  const full = await HomeVisit.findById(hv._id).populate('branch', 'name');
   res.status(201).json(new ApiResponse(201, { homeVisit: full }, 'Home visit created'));
 });
 
@@ -381,7 +373,7 @@ const listHomeVisits = asyncHandler(async (req, res) => {
   const query = {};
   if (search) {
     const term = String(search).trim();
-    query.$or = [{ patientName: new RegExp(term, 'i') }, { contact: new RegExp(term, 'i') }, { uhid: new RegExp(term, 'i') }, { location: new RegExp(term, 'i') }];
+    query.$or = [{ patientName: new RegExp(term, 'i') }, { contact: new RegExp(term, 'i') }, { location: new RegExp(term, 'i') }];
   }
   const range = parseRange(from, to);
   if (range.$gte || range.$lte) query.createdAt = range;
@@ -395,8 +387,7 @@ const listHomeVisits = asyncHandler(async (req, res) => {
     .sort({ [sortKey]: sortDir })
     .skip((Number(page) - 1) * Number(limit))
     .limit(Number(limit))
-    .populate('branch', 'name')
-    .populate('patient', 'uhid name mobile');
+    .populate('branch', 'name');
   res.status(200).json(new ApiResponse(200, { data: items, total, page: Number(page), limit: Number(limit), totalPages: Math.max(1, Math.ceil(total / Number(limit))) }));
 });
 
@@ -405,7 +396,7 @@ const updateHomeVisit = asyncHandler(async (req, res) => {
   const hv = await HomeVisit.findById(req.params.id);
   if (!hv) throw new ApiError(404, 'Home visit not found');
   const b = req.body;
-  for (const f of ['patientName', 'diagnosis', 'location', 'timing', 'contact', 'attendance', 'reason', 'branch', 'therapist', 'therapistSignature']) {
+  for (const f of ['patientName', 'diagnosis', 'location', 'timing', 'contact', 'attendance', 'reason', 'branch', 'therapist']) {
     if (b[f] !== undefined) hv[f] = b[f];
   }
   if (b.perSession !== undefined || b.advance !== undefined) {
@@ -414,7 +405,7 @@ const updateHomeVisit = asyncHandler(async (req, res) => {
     hv.due = Math.max(0, hv.perSession - hv.advance);
   }
   await hv.save();
-  const full = await HomeVisit.findById(hv._id).populate('branch', 'name').populate('patient', 'uhid name mobile');
+  const full = await HomeVisit.findById(hv._id).populate('branch', 'name');
   res.status(200).json(new ApiResponse(200, { homeVisit: full }, 'Home visit updated'));
 });
 

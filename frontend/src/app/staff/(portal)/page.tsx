@@ -4,8 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Loader2, Receipt, Users, CalendarCheck } from 'lucide-react';
-import { toast } from 'sonner';
-import OpEntryForm from '@/components/staff/OpEntryForm';
+import RegistrationForm, { type RegisteredResult } from '@/components/staff/RegistrationForm';
 import { staffFetch } from '@/lib/staff-auth';
 
 interface Patient {
@@ -52,10 +51,10 @@ export default function StaffDashboard() {
     void loadRecent();
   }, [loadRecent]);
 
-  const handleRegistered = (op: { _id: string; name: string; opdNumber: string }) => {
+  const handleRegistered = (result: RegisteredResult) => {
     void loadRecent();
-    toast.success(`Registered ${op.name} (${op.opdNumber})`);
-    router.push(`/staff/patients/${op._id}/invoice`);
+    const invoiceUrl = `/staff/patients/${result.patient._id}/invoice`;
+    router.push(invoiceUrl);
   };
 
   return (
@@ -67,7 +66,7 @@ export default function StaffDashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <OpEntryForm onRegistered={handleRegistered} />
+        <RegistrationForm onRegistered={handleRegistered} />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between">

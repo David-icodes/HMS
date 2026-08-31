@@ -26,11 +26,9 @@ const invoiceSchema = new mongoose.Schema(
     tax: { type: Number, default: 0 },
     total: { type: Number, default: 0 },
     amountPaid: { type: Number, default: 0 },
-    paymentMethod: {
-      type: String,
-      enum: ['cash', 'card', 'upi', 'insurance', 'other', 'pending'],
-      default: 'pending',
-    },
+    // Free text on purpose: payment methods come from the configurable PaymentMethod
+    // master (e.g. "Manoj GPay", "Cash", "UPI") and must not be restricted to a static enum.
+    paymentMethod: { type: String, default: 'pending', trim: true },
     status: { type: String, enum: ['draft', 'issued', 'paid', 'cancelled'], default: 'draft' },
     issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     notes: { type: String, trim: true },

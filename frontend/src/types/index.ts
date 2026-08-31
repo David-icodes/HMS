@@ -325,8 +325,7 @@ export interface Visit {
 
 export interface HomeVisit {
   _id: string;
-  patient?: string | { _id: string; uhid: string; name: string; mobile: string } | null;
-  uhid?: string;
+  serialNo?: number;
   patientName: string;
   diagnosis?: string;
   location?: string;
@@ -339,6 +338,5 @@ export interface HomeVisit {
   due: number;
   branch?: { _id: string; name: string } | null;
   therapist?: string;
-  therapistSignature?: string;
   createdAt: string;
 }

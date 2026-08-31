@@ -32,8 +32,8 @@ export default function HomeVisitsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const emptyForm = {
-    patientName: '', uhid: '', diagnosis: '', location: '', timing: '', contact: '', attendance: '',
-    reason: '', perSession: '', advance: '', branch: '', therapist: '', therapistSignature: '',
+    patientName: '', diagnosis: '', location: '', timing: '', contact: '', attendance: '',
+    reason: '', perSession: '', advance: '', branch: '', therapist: '',
   };
   const [form, setForm] = useState({ ...emptyForm });
 
@@ -76,18 +76,16 @@ export default function HomeVisitsPage() {
   const openEdit = (hv: HomeVisit) => {
     setForm({
       patientName: hv.patientName || '',
-      uhid: hv.uhid || (hv.patient && typeof hv.patient === 'object' ? hv.patient.uhid : '') || '',
       diagnosis: hv.diagnosis || '',
       location: hv.location || '',
       timing: hv.timing || '',
-      contact: hv.contact || (hv.patient && typeof hv.patient === 'object' ? hv.patient.mobile : '') || '',
+      contact: hv.contact || '',
       attendance: hv.attendance || '',
       reason: hv.reason || '',
       perSession: String(hv.perSession ?? ''),
       advance: String(hv.advance ?? ''),
       branch: hv.branch ? hv.branch._id : '',
       therapist: hv.therapist || '',
-      therapistSignature: hv.therapistSignature || '',
     });
     setEditingId(hv._id);
     setOpen(true);
@@ -103,7 +101,6 @@ export default function HomeVisitsPage() {
     try {
       const body = {
         patientName: form.patientName.trim(),
-        uhid: form.uhid.trim() || undefined,
         diagnosis: form.diagnosis.trim() || undefined,
         location: form.location.trim() || undefined,
         timing: form.timing.trim() || undefined,
@@ -114,7 +111,6 @@ export default function HomeVisitsPage() {
         advance: form.advance ? Number(form.advance) : 0,
         branch: form.branch || undefined,
         therapist: form.therapist.trim() || undefined,
-        therapistSignature: form.therapistSignature.trim() || undefined,
       };
       if (editingId) {
         await staffFetch(`/api/staff/home-visits/${editingId}`, { method: 'PUT', body });
@@ -194,9 +190,6 @@ export default function HomeVisitsPage() {
             <Field label="Patient Name *">
               <input value={form.patientName} onChange={(e) => setForm({ ...form, patientName: e.target.value })} className={inputCls} />
             </Field>
-            <Field label="UHID / Patient ID">
-              <input value={form.uhid} onChange={(e) => setForm({ ...form, uhid: e.target.value })} className={inputCls} placeholder="URH-…" />
-            </Field>
             <Field label="Diagnosis">
               <input value={form.diagnosis} onChange={(e) => setForm({ ...form, diagnosis: e.target.value })} className={inputCls} />
             </Field>
@@ -237,9 +230,6 @@ export default function HomeVisitsPage() {
             <Field label="Therapist Name">
               <input value={form.therapist} onChange={(e) => setForm({ ...form, therapist: e.target.value })} className={inputCls} />
             </Field>
-            <Field label="Therapist Signature">
-              <input value={form.therapistSignature} onChange={(e) => setForm({ ...form, therapistSignature: e.target.value })} className={inputCls} />
-            </Field>
           </div>
           <button
             type="submit"
@@ -258,7 +248,6 @@ export default function HomeVisitsPage() {
             <tr className="text-[10px] uppercase tracking-wider text-slate-500">
               <th className="px-3 py-2.5 font-semibold">S.No</th>
               <th className="px-3 py-2.5 font-semibold">Patient Name</th>
-              <th className="px-3 py-2.5 font-semibold">UHID</th>
               <th className="px-3 py-2.5 font-semibold">Diagnosis</th>
               <th className="px-3 py-2.5 font-semibold">Location</th>
               <th className="px-3 py-2.5 font-semibold">Timing</th>
@@ -270,29 +259,27 @@ export default function HomeVisitsPage() {
               <th className="px-3 py-2.5 font-semibold text-right">Due</th>
               <th className="px-3 py-2.5 font-semibold">Branch</th>
               <th className="px-3 py-2.5 font-semibold">Therapist</th>
-              <th className="px-3 py-2.5 font-semibold">Signature</th>
               <th className="px-3 py-2.5 text-right font-semibold">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={16} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={16} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
                   No home visits found.
                 </td>
               </tr>
             ) : (
-              rows.map((hv, i) => (
+              rows.map((hv) => (
                 <tr key={hv._id} className="hover:bg-slate-50">
-                  <td className="px-3 py-2.5 text-slate-500">{(page - 1) * 20 + i + 1}</td>
+                  <td className="px-3 py-2.5 text-slate-500">{hv.serialNo ?? '—'}</td>
                   <td className="px-3 py-2.5 font-medium text-slate-800">{hv.patientName}</td>
-                  <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{hv.uhid || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.diagnosis || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.location || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.timing || '—'}</td>
@@ -304,7 +291,6 @@ export default function HomeVisitsPage() {
                   <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(hv.due)}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.branch && typeof hv.branch === 'object' ? hv.branch.name : '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.therapist || '—'}</td>
-                  <td className="px-3 py-2.5 text-slate-600">{hv.therapistSignature || '—'}</td>
                   <td className="px-3 py-2.5 text-right">
                     <div className="inline-flex items-center gap-1">
                       <button

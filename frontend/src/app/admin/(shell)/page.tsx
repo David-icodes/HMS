@@ -15,25 +15,12 @@ import {
   Eye,
   Loader2,
   IndianRupee,
+  Wallet,
+  AlertTriangle,
 } from 'lucide-react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from 'recharts';
 import { toast } from 'sonner';
-import { adminFetch, useAuth } from '@/lib/admin-auth';
-import StatusBadge from '@/components/admin/StatusBadge';
+import { adminFetch } from '@/lib/admin-auth';
+import { inr } from '@/lib/billing';
 
 interface Stat {
   totalAppointments: number;
@@ -51,48 +38,35 @@ interface Stat {
   todayVisitors: number;
 }
 
-interface TrendPoint {
-  _id: string;
-  count: number;
-}
-
-interface DashboardData {
-  stats: Stat;
-  charts: {
-    appointmentsTrend: TrendPoint[];
-    opTrend: TrendPoint[];
-    appointmentByStatus: { _id: string; count: number }[];
-  };
-  recent: {
-    appointments: { _id: string; name: string; mobile: string; date: string; time: string; status: string; branch?: { name: string }; doctor?: { name: string } }[];
-    opRegistrations: { _id: string; name: string; opdNumber: string; mobile: string; status: string; branch?: { name: string }; department?: { name: string } }[];
-  };
-  activity: { _id: string; userName: string; action: string; entity: string; createdAt: string }[];
-}
-
 interface RevenueData {
   summary: {
-    totalRevenue: number;
     totalBilled: number;
-    opFees: number;
+    totalPaid: number;
+    totalDue: number;
     totalPatients: number;
-    completedPatients: number;
-    invoicesIssued: number;
+    totalTransactions: number;
   };
-  branchRows: { _id: string; branchName: string; area: string; totalPatients: number; completedPatients: number; revenue: number }[];
-  dailyRevenue: { _id: string; revenue: number; count: number }[];
+  branchRows: {
+    branchId: string;
+    branchName: string;
+    totalBilled: number;
+    totalPaid: number;
+    totalDue: number;
+    transactions: number;
+    totalPatients: number;
+  }[];
+  methodRows: {
+    methodName: string;
+    transactions: number;
+    revenue: number;
+    billed: number;
+    totalPatients: number;
+  }[];
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: '#f59e0b',
-  confirmed: '#0284c7',
-  completed: '#10b981',
-  cancelled: '#f43f5e',
-};
-
-function StatCard({ icon: Icon, label, value, sub }: { icon: typeof Eye; label: string; value: number; sub?: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+function StatCard({ icon: Icon, label, value, sub, to }: { icon: typeof Eye; label: string; value: number; sub?: string; to?: string }) {
+  const inner = (
+    <>
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
@@ -101,42 +75,45 @@ function StatCard({ icon: Icon, label, value, sub }: { icon: typeof Eye; label: 
       </div>
       <p className="mt-2 text-2xl font-bold text-slate-900">{value.toLocaleString()}</p>
       {sub && <p className="mt-0.5 text-xs text-slate-400">{sub}</p>}
-    </div>
+    </>
   );
+  const cls = 'block rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-colors hover:border-sky-200';
+  return to ? <Link href={to} className={cls}>{inner}</Link> : <div className={cls}>{inner}</div>;
 }
 
-function RevenueStat({ label, value }: { label: string; value: number }) {
+function RevStat({ label, value, tone }: { label: string; value: string; tone: 'sky' | 'emerald' | 'amber' }) {
+  const tones: Record<string, string> = {
+    sky: 'text-sky-700',
+    emerald: 'text-emerald-700',
+    amber: 'text-amber-700',
+  };
   return (
-    <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
+    <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-      <p className="mt-1 flex items-center gap-1 text-xl font-bold text-emerald-600">
-        <IndianRupee className="h-4 w-4" />
-        {value.toLocaleString()}
-      </p>
+      <p className={`mt-1 text-xl font-bold ${tones[tone]}`}>{value}</p>
     </div>
   );
 }
 
 export default function AdminDashboardPage() {
-  const { user } = useAuth();
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<Stat | null>(null);
   const [revenue, setRevenue] = useState<RevenueData | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    adminFetch<{ data: DashboardData }>('/api/admin/dashboard')
-      .then((res) => setData(res.data))
+    adminFetch<{ data: { stats: Stat } }>('/api/admin/dashboard')
+      .then((res) => setStats(res.data.stats))
       .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load dashboard'))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    adminFetch<{ data: RevenueData }>('/api/admin/revenue')
+    adminFetch<{ data: RevenueData }>('/api/admin/analytics/revenue')
       .then((res) => setRevenue(res.data))
       .catch(() => {});
   }, []);
 
-  if (loading || !data) {
+  if (loading || !stats) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center text-slate-400">
         <Loader2 className="h-8 w-8 animate-spin text-sky-600" />
@@ -144,216 +121,77 @@ export default function AdminDashboardPage() {
     );
   }
 
-  const { stats, charts, recent, activity } = data;
-  const canManageAppointments = user?.role === 'superAdmin' || user?.role === 'admin' || user?.role === 'receptionist';
+  const s = revenue?.summary;
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard icon={CalendarCheck} label="Appointments" value={stats.totalAppointments} sub={`${stats.todayAppointments} today`} />
-        <StatCard icon={Ticket} label="OP Registrations" value={stats.totalOp} sub={`${stats.todayOp} today`} />
-        <StatCard icon={Stethoscope} label="Active Doctors" value={stats.totalDoctors} />
-        <StatCard icon={Building2} label="Branches" value={stats.totalBranches} />
-        <StatCard icon={Briefcase} label="Services" value={stats.totalServices} />
-        <StatCard icon={Star} label="Testimonials" value={stats.totalTestimonials} />
-        <StatCard icon={FileText} label="Blog Posts" value={stats.totalPosts} />
-        <StatCard icon={Eye} label="Visitors" value={stats.totalVisitors} sub={`${stats.todayVisitors} today`} />
+        <StatCard icon={CalendarCheck} label="Appointments" value={stats.totalAppointments} sub={`${stats.todayAppointments} today`} to="/admin/appointments" />
+        <StatCard icon={Ticket} label="OP Registrations" value={stats.totalOp} sub={`${stats.todayOp} today`} to="/admin/op-registrations" />
+        <StatCard icon={Stethoscope} label="Active Doctors" value={stats.totalDoctors} to="/admin/doctors" />
+        <StatCard icon={Building2} label="Branches" value={stats.totalBranches} to="/admin/branches" />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2">
-          <h3 className="mb-4 text-sm font-bold text-slate-900">Appointment trend (last 14 days)</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={charts.appointmentsTrend}>
-              <defs>
-                <linearGradient id="appt" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0284c7" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#0284c7" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="_id" tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v: string) => v.slice(5)} />
-              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} allowDecimals={false} />
-              <Tooltip />
-              <Area type="monotone" dataKey="count" name="Appointments" stroke="#0284c7" strokeWidth={2} fill="url(#appt)" />
-            </AreaChart>
-          </ResponsiveContainer>
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-900">Revenue &amp; OP overview</h3>
+          <Link href="/admin/revenue" className="text-xs font-semibold text-sky-600 hover:underline">
+            Full revenue report →
+          </Link>
         </div>
-
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="mb-4 text-sm font-bold text-slate-900">Appointments by status</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <PieChart>
-              <Pie data={charts.appointmentByStatus} dataKey="count" nameKey="_id" innerRadius={55} outerRadius={85} paddingAngle={3}>
-                {charts.appointmentByStatus.map((entry) => (
-                  <Cell key={entry._id} fill={STATUS_COLORS[entry._id] || '#94a3b8'} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        {canManageAppointments && (
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <h3 className="text-sm font-bold text-slate-900">Latest activity</h3>
-              <Link href="/admin/activity" className="text-xs font-semibold text-sky-600 hover:underline">
-                View all
-              </Link>
-            </div>
-            <ul className="divide-y divide-slate-100">
-              {activity.map((a) => (
-                <li key={a._id} className="flex items-center gap-3 px-5 py-3">
-                  <div className="h-2 w-2 shrink-0 rounded-full bg-sky-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-slate-700">
-                      <span className="font-semibold capitalize">{a.action}</span>
-                      <span className="mx-1.5 text-slate-300">·</span>
-                      <span className="capitalize">{a.entity.replace(/-/g, ' ')}</span>
-                    </p>
-                    <p className="text-xs text-slate-400">{a.userName} · {new Date(a.createdAt).toLocaleString()}</p>
-                  </div>
-                </li>
-              ))}
-              {activity.length === 0 && <li className="px-5 py-8 text-center text-sm text-slate-400">No activity yet.</li>}
-            </ul>
-          </div>
-        )}
-
-        {canManageAppointments && (
-          <div className="space-y-6">
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-                <h3 className="text-sm font-bold text-slate-900">Recent appointments</h3>
-                <Link href="/admin/appointments" className="text-xs font-semibold text-sky-600 hover:underline">
-                  View all
-                </Link>
+          {revenue ? (
+            <>
+              <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-5">
+                <RevStat label="Billed" value={inr(s?.totalBilled ?? 0)} tone="sky" />
+                <RevStat label="Received" value={inr(s?.totalPaid ?? 0)} tone="emerald" />
+                <RevStat label="Due" value={inr(s?.totalDue ?? 0)} tone="amber" />
+                <RevStat label="Patients" value={(s?.totalPatients ?? 0).toLocaleString()} tone="sky" />
+                <RevStat label="Transactions" value={(s?.totalTransactions ?? 0).toLocaleString()} tone="emerald" />
               </div>
-              <ul className="divide-y divide-slate-100">
-                {recent.appointments.slice(0, 5).map((a) => (
-                  <li key={a._id} className="flex items-center gap-3 px-5 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-800">{a.name}</p>
-                      <p className="text-xs text-slate-400">
-                        {a.doctor?.name || 'Any doctor'} · {a.date?.slice(0, 10)} {a.time}
-                      </p>
-                    </div>
-                    <StatusBadge value={a.status} />
-                  </li>
-                ))}
-                {recent.appointments.length === 0 && <li className="px-5 py-8 text-center text-sm text-slate-400">No appointments yet.</li>}
-              </ul>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-                <h3 className="text-sm font-bold text-slate-900">Recent OP registrations</h3>
-                <Link href="/admin/op-registrations" className="text-xs font-semibold text-sky-600 hover:underline">
-                  View all
-                </Link>
-              </div>
-              <ul className="divide-y divide-slate-100">
-                {recent.opRegistrations.slice(0, 5).map((r) => (
-                  <li key={r._id} className="flex items-center gap-3 px-5 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-800">{r.name}</p>
-                      <p className="text-xs text-slate-400">{r.department?.name || 'General'} · OP-{r.opdNumber}</p>
-                    </div>
-                    <StatusBadge value={r.status} />
-                  </li>
-                ))}
-                {recent.opRegistrations.length === 0 && <li className="px-5 py-8 text-center text-sm text-slate-400">No registrations yet.</li>}
-              </ul>
-            </div>
-          </div>
-        )}
-
-        {!canManageAppointments && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2">
-            <h3 className="mb-4 text-sm font-bold text-slate-900">Recent activity</h3>
-            <ul className="divide-y divide-slate-100">
-              {activity.slice(0, 8).map((a) => (
-                <li key={a._id} className="flex items-center gap-3 py-3">
-                  <div className="h-2 w-2 shrink-0 rounded-full bg-sky-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-slate-700">
-                      <span className="font-semibold capitalize">{a.action}</span>
-                      <span className="mx-1.5 text-slate-300">·</span>
-                      <span className="capitalize">{a.entity.replace(/-/g, ' ')}</span>
-                    </p>
-                    <p className="text-xs text-slate-400">{a.userName} · {new Date(a.createdAt).toLocaleString()}</p>
-                  </div>
-                </li>
-              ))}
-              {activity.length === 0 && <li className="py-8 text-center text-sm text-slate-400">No activity yet.</li>}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-4 text-sm font-bold text-slate-900">Revenue &amp; OP overview</h3>
-        {revenue ? (
-          <>
-            <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
-              <RevenueStat label="Total Revenue" value={revenue.summary.totalRevenue} />
-              <RevenueStat label="Billed" value={revenue.summary.totalBilled} />
-              <RevenueStat label="OP Fees" value={revenue.summary.opFees} />
-              <RevenueStat label="Invoices" value={revenue.summary.invoicesIssued} />
-            </div>
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 xl:col-span-2">
-                <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Revenue trend
-                </h4>
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={revenue.dailyRevenue}>
-                    <defs>
-                      <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="_id" tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v: string) => v.slice(5)} />
-                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                    <Tooltip />
-                    <Area type="monotone" dataKey="revenue" name="Revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
-                <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Branch-wise revenue
-                </h4>
-                <div className="max-h-[220px] space-y-2 overflow-y-auto pr-1">
-                  {revenue.branchRows
-                    .filter((b) => b.revenue > 0 || b.totalPatients > 0)
-                    .map((b) => (
-                      <div key={b._id} className="rounded-lg bg-white p-3 shadow-sm">
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <div>
+                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Branch-wise revenue</h4>
+                  <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
+                    {revenue.branchRows.map((b) => (
+                      <div key={b.branchId} className="rounded-lg bg-slate-50 p-3">
                         <div className="flex items-center justify-between">
                           <p className="text-sm font-semibold text-slate-800">{b.branchName}</p>
-                          <p className="text-sm font-bold text-emerald-600">₹{b.revenue.toLocaleString()}</p>
+                          <p className="text-sm font-bold text-emerald-600">{inr(b.totalPaid)}</p>
                         </div>
                         <p className="text-xs text-slate-400">
-                          {b.totalPatients} patient{b.totalPatients === 1 ? '' : 's'} · {b.completedPatients} completed
+                          {b.totalPatients} patient(s) · {b.transactions} visit(s) · billed {inr(b.totalBilled)}
                         </p>
                       </div>
                     ))}
-                  {revenue.branchRows.filter((b) => b.revenue > 0 || b.totalPatients > 0).length === 0 && (
-                    <p className="py-8 text-center text-sm text-slate-400">No revenue data yet.</p>
-                  )}
+                    {revenue.branchRows.length === 0 && (
+                      <p className="py-6 text-center text-sm text-slate-400">No revenue data yet.</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Payment method-wise</h4>
+                  <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
+                    {revenue.methodRows.map((m) => (
+                      <div key={m.methodName} className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">{m.methodName}</p>
+                          <p className="text-xs text-slate-400">{m.transactions} transaction(s)</p>
+                        </div>
+                        <p className="text-sm font-bold text-sky-700">{inr(m.revenue)}</p>
+                      </div>
+                    ))}
+                    {revenue.methodRows.length === 0 && (
+                      <p className="py-6 text-center text-sm text-slate-400">No payment data yet.</p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          </>
-        ) : (
-          <p className="py-8 text-center text-sm text-slate-400">Loading revenue…</p>
-        )}
+            </>
+          ) : (
+            <p className="py-10 text-center text-sm text-slate-400">Loading revenue…</p>
+          )}
+        </div>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -382,6 +220,12 @@ export default function AdminDashboardPage() {
             </Link>
           ))}
         </div>
+      </div>
+
+      <div className="flex items-center gap-3 rounded-2xl border border-sky-100 bg-sky-50/50 px-4 py-3 text-sm text-sky-800">
+        <Wallet className="h-4 w-4 shrink-0" />
+        <span>Revenue is aggregated from actual OP visit charges &amp; payments. Open the <Link href="/admin/revenue" className="font-semibold underline">Revenue</Link> or <Link href="/admin/branch-reports" className="font-semibold underline">Branch Reports</Link> pages to filter by branch, date and payment method.</span>
+        <AlertTriangle className="ml-auto h-4 w-4 shrink-0 opacity-40" />
       </div>
     </div>
   );

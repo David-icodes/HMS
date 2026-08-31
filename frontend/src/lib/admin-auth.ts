@@ -56,10 +56,16 @@ export async function adminFetch<T = unknown>(
 
   const payload = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new AdminApiError(
-      res.status,
-      payload?.message || `Request failed (${res.status})`,
-    );
+    let msg = payload?.message || `Request failed (${res.status})`;
+    if (Array.isArray(payload?.errors) && payload.errors.length) {
+      const details = payload.errors
+        .map((e: { field?: string; message?: string }) => (e?.message || e?.field || '').trim())
+        .filter(Boolean)
+        .slice(0, 3)
+        .join('. ');
+      if (details) msg = `${msg}: ${details}`;
+    }
+    throw new AdminApiError(res.status, msg);
   }
   return payload as T;
 }
