@@ -34,6 +34,7 @@ const visitSchema = new mongoose.Schema(
     branch: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
     department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
     doctor: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor' },
+    referralDoctor: { type: String, trim: true, default: '' },
     opNumber: { type: String, unique: true, trim: true },
     concern: { type: String, trim: true, maxlength: 500 },
     diagnosis: { type: String, trim: true, maxlength: 500 },

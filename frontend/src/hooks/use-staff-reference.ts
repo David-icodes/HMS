@@ -40,12 +40,15 @@ export function useStaffReference() {
   const doctorsForDepartment = useCallback(
     (departmentId: string) => {
       if (!departmentId) return doctors;
-      return doctors.filter((d) => {
+      const matched = doctors.filter((d) => {
         const dep = d.department;
         if (dep && typeof dep === 'object') return dep._id === departmentId;
         if (dep && typeof dep === 'string') return dep === departmentId;
         return false;
       });
+      // If the selected department has no assigned doctors, fall back to the full
+      // list so the Doctor dropdown stays usable (never empty/disabled).
+      return matched.length > 0 ? matched : doctors;
     },
     [doctors],
   );

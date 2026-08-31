@@ -190,6 +190,7 @@ function VisitInvoiceSheet({ visit, invoice }: { visit: Visit; invoice: Invoice 
         </div>
         <div>
           <Row label="Doctor" value={visit.doctor?.name || '—'} />
+          <Row label="Referral Doctor" value={visit.referralDoctor || '—'} />
           <Row label="Department" value={visit.department?.name || '—'} />
           <Row label="Visit Type" value={visit.visitType || '—'} />
           <Row label="OP / Token No." value={visit.opNumber || '—'} />

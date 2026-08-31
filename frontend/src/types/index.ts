@@ -309,6 +309,7 @@ export interface Visit {
   branch?: { _id: string; name: string; address?: string; area?: string; city?: string; phone?: string } | null;
   department?: { _id: string; name: string; slug?: string } | null;
   doctor?: { _id: string; name: string; designation?: string } | null;
+  referralDoctor?: string;
   opNumber?: string;
   concern?: string;
   diagnosis?: string;

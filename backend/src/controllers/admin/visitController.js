@@ -152,6 +152,7 @@ const createVisitForPatient = async (patient, body, userId) => {
     branch: body.visit?.branch || undefined,
     department: body.visit?.department || undefined,
     doctor: body.visit?.doctor || undefined,
+    referralDoctor: body.visit?.referralDoctor || '',
     concern: body.visit?.concern || undefined,
     diagnosis: body.visit?.diagnosis || undefined,
     treatment: body.visit?.treatment || undefined,
@@ -235,7 +236,7 @@ const updateVisit = asyncHandler(async (req, res) => {
   if (!visit) throw new ApiError(404, 'Visit not found');
 
   const v = req.body.visit || req.body;
-  for (const f of ['visitDate', 'visitType', 'branch', 'department', 'doctor', 'concern', 'diagnosis', 'treatment', 'noOfDays', 'notes', 'signature']) {
+  for (const f of ['visitDate', 'visitType', 'branch', 'department', 'doctor', 'referralDoctor', 'concern', 'diagnosis', 'treatment', 'noOfDays', 'notes', 'signature']) {
     if (v[f] !== undefined) visit[f] = v[f];
   }
 
@@ -279,6 +280,7 @@ const generateVisitInvoice = asyncHandler(async (req, res) => {
     patient: visit.patient ? visit.patient._id : undefined,
     branch: visit.branch ? visit.branch._id : undefined,
     department: visit.department ? visit.department._id : undefined,
+    referralDoctor: visit.referralDoctor || '',
     patientName: visit.patient?.name || visit.patient?.name || '',
     patientMobile: visit.patient?.mobile || '',
     patientAddress: visit.patient?.address,

@@ -21,6 +21,32 @@ const parseRange = (from, to) => {
   return range;
 };
 
+// Best-effort enrichment: attach referralDoctor (from the newest staff Visit) to legacy
+// OpRegistration rows. Joined via the shared patient mobile number. Never throws.
+const enrichReferralDoctor = async (rows) => {
+  try {
+    const mobiles = rows.map((r) => r.mobile).filter(Boolean);
+    if (!mobiles.length) return rows;
+    const Visit = require('../../models/Visit');
+    const Patient = mongoose.model('Patient');
+    const patients = await Patient.find({ mobile: { $in: mobiles } }).select('_id').lean();
+    const patientIds = patients.map((p) => p._id);
+    const visits = await Visit.find({ patient: { $in: patientIds }, referralDoctor: { $ne: '' } })
+      .sort({ createdAt: -1 })
+      .populate('patient', 'mobile')
+      .select('referralDoctor patient')
+      .lean();
+    const byMobile = {};
+    for (const v of visits) {
+      const m = v.patient && v.patient.mobile;
+      if (m && byMobile[m] === undefined) byMobile[m] = v.referralDoctor;
+    }
+    return rows.map((r) => ({ ...r, referralDoctor: (r.mobile && byMobile[r.mobile]) || undefined }));
+  } catch (e) {
+    return rows;
+  }
+};
+
 const listPatients = asyncHandler(async (req, res) => {
   const { search, from, to, branch, status, page = 1, limit = 10, sort = '-createdAt' } = req.query;
   const query = {};
@@ -54,9 +80,11 @@ const listPatients = asyncHandler(async (req, res) => {
     .populate('branch', 'name area')
     .populate('department', 'name');
 
+  const enriched = await enrichReferralDoctor(items);
+
   res.status(200).json(
     new ApiResponse(200, {
-      data: items,
+      data: enriched,
       total,
       page: Number(page),
       limit: Number(limit),
@@ -75,7 +103,7 @@ const exportPatients = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .populate('branch', 'name')
     .populate('department', 'name');
-  res.status(200).json(new ApiResponse(200, items));
+  res.status(200).json(new ApiResponse(200, await enrichReferralDoctor(items)));
 });
 
 const revenueReport = asyncHandler(async (req, res) => {

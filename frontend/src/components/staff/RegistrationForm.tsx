@@ -47,6 +47,7 @@ export default function RegistrationForm({
     branch: '',
     department: '',
     doctor: '',
+    referralDoctor: '',
     concern: '',
     diagnosis: '',
     treatment: '',
@@ -145,6 +146,7 @@ export default function RegistrationForm({
           branch: v.branch || undefined,
           department: v.department || undefined,
           doctor: v.doctor || undefined,
+          referralDoctor: v.referralDoctor.trim() || '',
           concern: v.concern.trim() || undefined,
           diagnosis: v.diagnosis.trim() || undefined,
           treatment: v.treatment.trim() || undefined,
@@ -342,6 +344,14 @@ export default function RegistrationForm({
                 <option key={d._id} value={d._id}>{d.name}{d.designation ? ` · ${d.designation}` : ''}</option>
               ))}
             </select>
+          </Field>
+          <Field label="Referral Doctor">
+            <input
+              value={v.referralDoctor}
+              onChange={(e) => setV({ ...v, referralDoctor: e.target.value })}
+              placeholder="Optional referring doctor"
+              className={inputCls}
+            />
           </Field>
           <Field label="No. of Days">
             <input value={v.noOfDays} onChange={(e) => setV({ ...v, noOfDays: e.target.value })} type="number" min={0} className={inputCls} />

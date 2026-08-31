@@ -16,6 +16,7 @@ const invoiceSchema = new mongoose.Schema(
     patient: { type: mongoose.Schema.Types.ObjectId, ref: 'OpRegistration' },
     branch: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
     department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
+    referralDoctor: { type: String, trim: true, default: '' },
     patientName: { type: String, required: true, trim: true },
     patientMobile: { type: String, required: true, trim: true },
     patientAddress: { type: String, trim: true },
