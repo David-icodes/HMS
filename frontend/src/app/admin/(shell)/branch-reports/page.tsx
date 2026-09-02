@@ -223,7 +223,7 @@ export default function AdminBranchReportsPage() {
               <p className="text-xs text-slate-400">{b.area}</p>
               <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-center">
                 <Mini label="Patients" value={b.totalPatients.toLocaleString()} />
-                <Mini label="Billed" value={inr(b.totalBilled)} />
+                <Mini label="Paid" value={inr(b.totalPaid)} tone="emerald" />
                 <Mini label="Due" value={inr(b.totalDue)} tone="amber" />
               </div>
             </button>
@@ -259,10 +259,10 @@ function Stat({ label, value, icon: Icon, tone }: { label: string; value: string
   );
 }
 
-function Mini({ label, value, tone }: { label: string; value: string; tone?: 'amber' }) {
+function Mini({ label, value, tone }: { label: string; value: string; tone?: 'amber' | 'emerald' }) {
   return (
     <div>
-      <p className={`text-sm font-bold ${tone === 'amber' ? 'text-amber-600' : 'text-slate-800'}`}>{value}</p>
+      <p className={`text-sm font-bold ${tone === 'amber' ? 'text-amber-600' : tone === 'emerald' ? 'text-emerald-600' : 'text-slate-800'}`}>{value}</p>
       <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
     </div>
   );

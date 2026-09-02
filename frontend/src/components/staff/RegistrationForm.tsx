@@ -10,7 +10,7 @@ import type { Patient, Visit } from '@/types';
 
 const GENDERS = ['Male', 'Female', 'Other'];
 const VISIT_TYPES = ['New OP', 'Follow-up'];
-const CH_OPTIONS = ['Client', 'Home'];
+const CH_OPTIONS = ['Clinic', 'Home'];
 const FN_OPTIONS = ['Follow', 'Not Follow'];
 
 const inputCls =
@@ -40,7 +40,7 @@ export default function RegistrationForm({
   const [selected, setSelected] = useState<ExistingPatient | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [p, setP] = useState({ name: '', mobile: '', age: '', gender: 'Male', cH: 'Client', fN: '', address: '' });
+  const [p, setP] = useState({ name: '', mobile: '', age: '', gender: 'Male', cH: 'Clinic', fN: '', address: '' });
   const [v, setV] = useState({
     visitDate: new Date().toISOString().split('T')[0],
     visitType: 'New OP',
@@ -103,7 +103,7 @@ export default function RegistrationForm({
       mobile: pat.mobile,
       age: pat.age != null ? String(pat.age) : '',
       gender: pat.gender || 'Male',
-      cH: pat.cH || 'Cash',
+      cH: pat.cH || 'Clinic',
       fN: pat.fN || '',
       address: pat.address || '',
     });
@@ -115,7 +115,7 @@ export default function RegistrationForm({
     setSelected(null);
     setSearch('');
     setResults([]);
-    setP({ name: '', mobile: '', age: '', gender: 'Male', cH: 'Client', fN: '', address: '' });
+    setP({ name: '', mobile: '', age: '', gender: 'Male', cH: 'Clinic', fN: '', address: '' });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

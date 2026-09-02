@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, RefreshCw, Search, Download, Eye, Pencil, Trash2, Receipt, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, RefreshCw, Search, Download, Eye, Pencil, Trash2, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import ExcelJS from 'exceljs';
 import { adminFetch } from '@/lib/admin-auth';
@@ -324,13 +324,6 @@ export default function AdminPatientsPage() {
                         >
                           {p && deletingId === p._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                         </button>
-                        <Link
-                          href={`/staff/patients/${p?._id || ''}/invoice`}
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-teal-50 hover:text-teal-600"
-                          aria-label="Invoice"
-                        >
-                          <Receipt className="h-3.5 w-3.5" />
-                        </Link>
                       </div>
                     </td>
                   </tr>
@@ -395,7 +388,7 @@ export default function AdminPatientsPage() {
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">C/H (Client/Home)</label>
+                <label className="mb-1 block text-xs font-medium text-slate-500">C/H (Clinic/Home)</label>
                 <input className={fieldCls} value={editForm.cH} onChange={(e) => setEditForm({ ...editForm, cH: e.target.value })} />
               </div>
               <div>

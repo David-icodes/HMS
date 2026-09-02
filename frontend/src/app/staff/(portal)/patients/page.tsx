@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Search, Printer, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Search, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
 import { staffFetch } from '@/lib/staff-auth';
 import type { Visit } from '@/types';
 
@@ -114,20 +114,12 @@ export default function StaffPatients() {
                     <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(v.payment?.due)}</td>
                     <td className="px-3 py-2.5 text-slate-600">{formatDate(v.visitDate || v.createdAt)}</td>
                     <td className="px-3 py-2.5 text-right">
-                      <div className="inline-flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => router.push(`/staff/patients/${pat?._id || ''}`)}
-                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
-                        >
-                          <Eye className="h-3 w-3" /> View
-                        </button>
-                        <button
-                          onClick={() => router.push(`/staff/visits/${v._id}/invoice`)}
-                          className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-teal-700"
-                        >
-                          <Printer className="h-3 w-3" /> {v.invoiceNumber ? 'Print Invoice' : 'Invoice'}
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => router.push(`/staff/visits/${v._id}/invoice`)}
+                        className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-teal-700"
+                      >
+                        <Printer className="h-3 w-3" /> {v.invoiceNumber ? 'Print Invoice' : 'Invoice'}
+                      </button>
                     </td>
                   </tr>
                 );
