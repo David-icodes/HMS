@@ -38,6 +38,7 @@ const {
   exportMasterPatients,
   updateMasterPatient,
   deleteMasterPatient,
+  listVisits,
 } = require('../controllers/admin/visitController');
 const { createUserValidator, updateUserValidator } = require('../validators/authValidator');
 const { idValidator, modelValidator } = require('../validators/siteValidator');
@@ -53,6 +54,7 @@ router.get('/dashboard', authorize('superAdmin', 'admin', 'contentEditor', 'rece
 router.get('/activity-logs', authorize('superAdmin', 'admin'), getActivityLogs);
 
 router.get('/revenue', authorize('superAdmin', 'admin'), revenueReport);
+router.get('/visits', authorize('superAdmin', 'admin', 'receptionist'), listVisits);
 router.get('/patients', authorize('superAdmin', 'admin', 'receptionist'), listMasterPatients);
 router.get('/patients/export', authorize('superAdmin', 'admin'), exportMasterPatients);
 router.get('/patients/:id', authorize('superAdmin', 'admin'), getMasterPatient);
