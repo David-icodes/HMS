@@ -364,6 +364,9 @@ const createHomeVisit = asyncHandler(async (req, res) => {
     due,
     branch: b.branch || undefined,
     therapist: b.therapist,
+    referralDoctor: b.referralDoctor || '',
+    staffInTime: b.staffInTime || '',
+    staffOutTime: b.staffOutTime || '',
     createdBy: req.user._id,
   });
   const full = await HomeVisit.findById(hv._id).populate('branch', 'name');
@@ -398,7 +401,7 @@ const updateHomeVisit = asyncHandler(async (req, res) => {
   const hv = await HomeVisit.findById(req.params.id);
   if (!hv) throw new ApiError(404, 'Home visit not found');
   const b = req.body;
-  for (const f of ['patientName', 'diagnosis', 'location', 'timing', 'contact', 'attendance', 'reason', 'branch', 'therapist']) {
+  for (const f of ['patientName', 'diagnosis', 'location', 'timing', 'contact', 'attendance', 'reason', 'branch', 'therapist', 'referralDoctor', 'staffInTime', 'staffOutTime']) {
     if (b[f] !== undefined) hv[f] = b[f];
   }
   if (b.perSession !== undefined || b.advance !== undefined) {
@@ -424,6 +427,144 @@ const listPaymentMethods = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, methods));
 });
 
+// ---------- Unified master patient list (Patient + Visit) ----------
+// Enriches each Patient with lastVisit, visitCount and non-negative outstanding balance
+// computed from actual Visit billing records.
+const buildPatientRows = async (patients) => {
+  if (!patients.length) return [];
+  const ids = patients.map((p) => p._id);
+  const [visits, outstandingAgg] = await Promise.all([
+    Visit.find({ patient: { $in: ids } })
+      .sort({ visitDate: -1 })
+      .select('patient visitDate visitType department doctor opNumber charges payment.received payment.advanced payment.due payment.status')
+      .populate('department', 'name')
+      .populate('doctor', 'name')
+      .lean(),
+    Visit.aggregate([
+      { $match: { patient: { $in: ids }, 'payment.status': { $in: ['Due', 'Partial'] } } },
+      { $group: { _id: '$patient', due: { $sum: '$payment.due' } } },
+    ]),
+  ]);
+  const dueMap = {};
+  outstandingAgg.forEach((r) => {
+    dueMap[r._id.toString()] = Math.max(0, r.due || 0);
+  });
+  const lastByPatient = {};
+  visits.forEach((v) => {
+    if (lastByPatient[v.patient.toString()] === undefined) lastByPatient[v.patient.toString()] = v;
+  });
+  return patients.map((p) => {
+    const id = p._id.toString();
+    const last = lastByPatient[id] || null;
+    return {
+      ...p.toObject(),
+      lastVisit: last,
+      visitCount: visits.filter((v) => v.patient.toString() === id).length,
+      outstanding: dueMap[id] || 0,
+    };
+  });
+};
+
+const listMasterPatients = asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20, search, from, to, branch, department, gender, sort = '-createdAt' } = req.query;
+  const query = {};
+  const range = parseRange(from, to);
+  if (range.$gte || range.$lte) query.createdAt = range;
+  if (branch) query._id = { $in: await Visit.distinct('patient', { branch }) };
+  if (department) query._id = { $in: await Visit.distinct('patient', { department }) };
+  if (gender) query.gender = gender;
+
+  if (search) {
+    const term = String(search).trim();
+    const digits = term.replace(/\D/g, '');
+    const or = [{ name: new RegExp(term, 'i') }, { uhid: new RegExp(term, 'i') }, { mobile: new RegExp(term, 'i') }];
+    if (digits) or.push({ mobile: new RegExp(digits) });
+    query.$and = [{ $or: or }];
+  }
+
+  const total = await Patient.countDocuments(query);
+  const sortKey = sort.replace(/^-/, '');
+  const sortDir = sort.startsWith('-') ? -1 : 1;
+  const patients = await Patient.find(query)
+    .sort({ [sortKey]: sortDir })
+    .skip((Number(page) - 1) * Number(limit))
+    .limit(Number(limit));
+
+  const rows = await buildPatientRows(patients);
+  res.status(200).json(
+    new ApiResponse(200, {
+      data: rows,
+      total,
+      page: Number(page),
+      limit: Number(limit),
+      totalPages: Math.max(1, Math.ceil(total / Number(limit))),
+    })
+  );
+});
+
+// ---------- Single master patient ----------
+const getMasterPatient = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid patient id');
+  const patient = await Patient.findById(req.params.id);
+  if (!patient) throw new ApiError(404, 'Patient not found');
+  const [rows] = await buildPatientRows([patient]);
+  res.status(200).json(new ApiResponse(200, rows));
+});
+
+// ---------- Update master patient (admin only) ----------
+const updateMasterPatient = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid patient id');
+  const patient = await Patient.findById(req.params.id);
+  if (!patient) throw new ApiError(404, 'Patient not found');
+  const b = req.body.patient || req.body;
+  if (b.mobile !== undefined && b.mobile !== patient.mobile) {
+    const dup = await Patient.findOne({ mobile: b.mobile, _id: { $ne: patient._id } });
+    if (dup) throw new ApiError(400, 'Another patient already uses this mobile number');
+  }
+  for (const f of ['name', 'mobile', 'age', 'gender', 'cH', 'fN', 'address']) {
+    if (b[f] !== undefined) patient[f] = b[f];
+  }
+  if (patient.age !== undefined && patient.age !== null) patient.age = Number(patient.age);
+  await patient.save();
+  const [row] = await buildPatientRows([patient]);
+  await logActivity({ req, action: 'update_patient', entity: 'patient', entityId: patient._id, details: { uhid: patient.uhid, name: patient.name } });
+  res.status(200).json(new ApiResponse(200, { patient: row }, 'Patient updated'));
+});
+
+// ---------- Delete master patient (admin only) ----------
+const deleteMasterPatient = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid patient id');
+  const patient = await Patient.findById(req.params.id);
+  if (!patient) throw new ApiError(404, 'Patient not found');
+  const visits = await Visit.find({ patient: patient._id }).select('opNumber').lean();
+  const opNumbers = visits.map((v) => v.opNumber).filter(Boolean);
+  await Invoice.deleteMany({ patient: patient._id, opdNumber: { $in: opNumbers } });
+  await Invoice.deleteMany({ patient: patient._id, opdNumber: patient.uhid });
+  await Visit.deleteMany({ patient: patient._id });
+  const uhid = patient.uhid;
+  await Patient.deleteOne({ _id: patient._id });
+  await logActivity({ req, action: 'delete_patient', entity: 'patient', entityId: patient._id, details: { uhid, name: patient.name } });
+  res.status(200).json(new ApiResponse(200, null, 'Patient deleted'));
+});
+
+// ---------- Export master patients (all matching, for admin) ----------
+const exportMasterPatients = asyncHandler(async (req, res) => {
+  const { search, from, to, branch, department, gender } = req.query;
+  const query = {};
+  const range = parseRange(from, to);
+  if (range.$gte || range.$lte) query.createdAt = range;
+  if (branch) query._id = { $in: await Visit.distinct('patient', { branch }) };
+  if (department) query._id = { $in: await Visit.distinct('patient', { department }) };
+  if (gender) query.gender = gender;
+  if (search) {
+    const term = String(search).trim();
+    query.$and = [{ $or: [{ name: new RegExp(term, 'i') }, { uhid: new RegExp(term, 'i') }, { mobile: new RegExp(term, 'i') }] }];
+  }
+  const patients = await Patient.find(query).sort({ createdAt: -1 }).limit(5000);
+  const rows = await buildPatientRows(patients);
+  res.status(200).json(new ApiResponse(200, rows));
+});
+
 module.exports = {
   listPaymentMethods,
   searchPatients,
@@ -439,4 +580,9 @@ module.exports = {
   listHomeVisits,
   updateHomeVisit,
   deleteHomeVisit,
+  listMasterPatients,
+  getMasterPatient,
+  updateMasterPatient,
+  deleteMasterPatient,
+  exportMasterPatients,
 };

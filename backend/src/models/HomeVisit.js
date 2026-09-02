@@ -16,6 +16,9 @@ const homeVisitSchema = new mongoose.Schema(
     due: { type: Number, default: 0, min: 0 },
     branch: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
     therapist: { type: String, trim: true },
+    referralDoctor: { type: String, trim: true, default: '' },
+    staffInTime: { type: String, trim: true, default: '' },
+    staffOutTime: { type: String, trim: true, default: '' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }

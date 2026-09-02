@@ -4,7 +4,6 @@ const authorize = require('../middleware/authorize');
 const sanitize = require('../middleware/sanitize');
 const { idValidator } = require('../validators/siteValidator');
 const {
-  listPatients,
   generateInvoice,
 } = require('../controllers/admin/opController');
 const Invoice = require('../models/Invoice');
@@ -28,6 +27,8 @@ const {
   updateHomeVisit,
   deleteHomeVisit,
   listPaymentMethods,
+  listMasterPatients,
+  getMasterPatient,
 } = require('../controllers/admin/visitController');
 
 const router = express.Router();
@@ -36,7 +37,8 @@ router.use(protect);
 router.use(sanitize);
 router.use(authorize('receptionist', 'admin', 'superAdmin'));
 
-router.get('/patients', listPatients);
+router.get('/patients', listMasterPatients);
+router.get('/patients/:id/profile-master', getMasterPatient);
 router.get('/payment-methods', listPaymentMethods);
 
 router.post('/op-registrations', asyncHandler(async (req, res) => {

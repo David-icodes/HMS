@@ -26,12 +26,18 @@ const {
 } = require('../controllers/admin/cmsController');
 const { getDashboard, getActivityLogs } = require('../controllers/admin/dashboardController');
 const { uploadImage, deleteImage } = require('../controllers/admin/uploadController');
-const { listPatients, exportPatients, revenueReport } = require('../controllers/admin/opController');
+const { revenueReport } = require('../controllers/admin/opController');
 const {
   branchList,
   branchDetail,
   revenueReport: analyticsRevenue,
 } = require('../controllers/admin/analyticsController');
+const {
+  listMasterPatients,
+  exportMasterPatients,
+  updateMasterPatient,
+  deleteMasterPatient,
+} = require('../controllers/admin/visitController');
 const { createUserValidator, updateUserValidator } = require('../validators/authValidator');
 const { idValidator, modelValidator } = require('../validators/siteValidator');
 
@@ -46,8 +52,10 @@ router.get('/dashboard', authorize('superAdmin', 'admin', 'contentEditor', 'rece
 router.get('/activity-logs', authorize('superAdmin', 'admin'), getActivityLogs);
 
 router.get('/revenue', authorize('superAdmin', 'admin'), revenueReport);
-router.get('/patients', authorize('superAdmin', 'admin', 'receptionist'), listPatients);
-router.get('/patients/export', authorize('superAdmin', 'admin', 'receptionist'), exportPatients);
+router.get('/patients', authorize('superAdmin', 'admin', 'receptionist'), listMasterPatients);
+router.get('/patients/export', authorize('superAdmin', 'admin'), exportMasterPatients);
+router.put('/patients/:id', authorize('superAdmin', 'admin'), updateMasterPatient);
+router.delete('/patients/:id', authorize('superAdmin', 'admin'), deleteMasterPatient);
 
 router.get('/analytics/branches', authorize('superAdmin', 'admin'), branchList);
 router.get('/analytics/branches/:id', authorize('superAdmin', 'admin'), branchDetail);

@@ -339,5 +339,8 @@ export interface HomeVisit {
   due: number;
   branch?: { _id: string; name: string } | null;
   therapist?: string;
+  referralDoctor?: string;
+  staffInTime?: string;
+  staffOutTime?: string;
   createdAt: string;
 }

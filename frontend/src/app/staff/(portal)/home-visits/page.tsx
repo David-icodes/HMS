@@ -33,7 +33,8 @@ export default function HomeVisitsPage() {
   const [saving, setSaving] = useState(false);
   const emptyForm = {
     patientName: '', diagnosis: '', location: '', timing: '', contact: '', attendance: '',
-    reason: '', perSession: '', advance: '', branch: '', therapist: '',
+    reason: '', perSession: '', advance: '', branch: '', therapist: '', referralDoctor: '',
+    staffInTime: '', staffOutTime: '',
   };
   const [form, setForm] = useState({ ...emptyForm });
 
@@ -86,6 +87,9 @@ export default function HomeVisitsPage() {
       advance: String(hv.advance ?? ''),
       branch: hv.branch ? hv.branch._id : '',
       therapist: hv.therapist || '',
+      referralDoctor: hv.referralDoctor || '',
+      staffInTime: hv.staffInTime || '',
+      staffOutTime: hv.staffOutTime || '',
     });
     setEditingId(hv._id);
     setOpen(true);
@@ -111,6 +115,9 @@ export default function HomeVisitsPage() {
         advance: form.advance ? Number(form.advance) : 0,
         branch: form.branch || undefined,
         therapist: form.therapist.trim() || undefined,
+        referralDoctor: form.referralDoctor.trim() || undefined,
+        staffInTime: form.staffInTime.trim() || undefined,
+        staffOutTime: form.staffOutTime.trim() || undefined,
       };
       if (editingId) {
         await staffFetch(`/api/staff/home-visits/${editingId}`, { method: 'PUT', body });
@@ -230,6 +237,15 @@ export default function HomeVisitsPage() {
             <Field label="Therapist Name">
               <input value={form.therapist} onChange={(e) => setForm({ ...form, therapist: e.target.value })} className={inputCls} />
             </Field>
+            <Field label="Referral Doctor">
+              <input value={form.referralDoctor} onChange={(e) => setForm({ ...form, referralDoctor: e.target.value })} className={inputCls} />
+            </Field>
+            <Field label="Staff In Time">
+              <input value={form.staffInTime} onChange={(e) => setForm({ ...form, staffInTime: e.target.value })} type="time" className={inputCls} />
+            </Field>
+            <Field label="Staff Out Time">
+              <input value={form.staffOutTime} onChange={(e) => setForm({ ...form, staffOutTime: e.target.value })} type="time" className={inputCls} />
+            </Field>
           </div>
           <button
             type="submit"
@@ -259,19 +275,22 @@ export default function HomeVisitsPage() {
               <th className="px-3 py-2.5 font-semibold text-right">Due</th>
               <th className="px-3 py-2.5 font-semibold">Branch</th>
               <th className="px-3 py-2.5 font-semibold">Therapist</th>
+              <th className="px-3 py-2.5 font-semibold">Referral Doctor</th>
+              <th className="px-3 py-2.5 font-semibold">Staff In</th>
+              <th className="px-3 py-2.5 font-semibold">Staff Out</th>
               <th className="px-3 py-2.5 text-right font-semibold">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={17} className="px-4 py-12 text-center text-slate-400">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={17} className="px-4 py-12 text-center text-slate-400">
                   No home visits found.
                 </td>
               </tr>
@@ -291,6 +310,9 @@ export default function HomeVisitsPage() {
                   <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(hv.due)}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.branch && typeof hv.branch === 'object' ? hv.branch.name : '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.therapist || '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-600">{hv.referralDoctor || '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-600">{hv.staffInTime || '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-600">{hv.staffOutTime || '—'}</td>
                   <td className="px-3 py-2.5 text-right">
                     <div className="inline-flex items-center gap-1">
                       <button

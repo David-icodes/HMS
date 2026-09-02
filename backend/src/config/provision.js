@@ -62,8 +62,8 @@ const provision = async () => {
 };
 
 const PAYMENT_METHODS = [
-  { name: 'Manoj GPay', description: 'UPI via Manoj GPay account' },
-  { name: 'Manoj Pay', description: 'Pay app via Manoj account' },
+  { name: 'Hevanthi GPay', description: 'UPI via Hevanthi GPay account' },
+  { name: 'Hevanthi Pay', description: 'Pay app via Hevanthi account' },
   { name: 'Current Account', description: 'Bank current account transfer' },
   { name: 'Cash', description: 'Cash payment' },
   { name: 'UPI', description: 'Other UPI / GPay / PhonePe' },
