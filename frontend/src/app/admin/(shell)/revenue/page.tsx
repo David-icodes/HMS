@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, IndianRupee, Wallet, AlertTriangle, Users, ReceiptText, RotateCcw } from 'lucide-react';
+import { Loader2, IndianRupee, Wallet, AlertTriangle, Users, ReceiptText, RotateCcw, Download, X, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
+import ExcelJS from 'exceljs';
 import { adminFetch } from '@/lib/admin-auth';
 import { inr } from '@/lib/billing';
 import type { Branch } from '@/types';
@@ -29,6 +30,7 @@ interface RevenuePayload {
     transactions: number;
     revenue: number;
     billed: number;
+    due: number;
     totalPatients: number;
   }[];
 }
@@ -44,6 +46,8 @@ export default function AdminRevenuePage() {
   const [methods, setMethods] = useState<{ _id: string; name: string }[]>([]);
   const [data, setData] = useState<RevenuePayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState<'branch' | 'method' | null>(null);
 
   useEffect(() => {
     fetch('/api/site/branches')
@@ -84,6 +88,94 @@ export default function AdminRevenuePage() {
     setMethod('');
   };
 
+  const runExport = async (kind: 'branch' | 'method') => {
+    setExporting(kind);
+    const qs = {
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+      ...(branch ? { branch } : {}),
+      ...(method ? { method } : {}),
+    };
+    const q = new URLSearchParams(qs).toString();
+    try {
+      const res = await adminFetch<{ data: RevenuePayload }>(`/api/admin/analytics/revenue${q ? `?${q}` : ''}`);
+      const payload = res.data;
+      const workbook = new ExcelJS.Workbook();
+      workbook.created = new Date();
+      workbook.creator = 'Urmila Raj Hospital';
+
+      if (kind === 'branch') {
+        const sheet = workbook.addWorksheet('Branch Revenue');
+        sheet.columns = [
+          { header: 'S.No.', key: 'sno', width: 6 },
+          { header: 'Branch', key: 'branch', width: 24 },
+          { header: 'Patient Count', key: 'patients', width: 14 },
+          { header: 'OP Count', key: 'op', width: 12 },
+          { header: 'Total Billing (₹)', key: 'billed', width: 18 },
+          { header: 'Paid / Collected (₹)', key: 'paid', width: 20 },
+          { header: 'Due (₹)', key: 'due', width: 14 },
+        ];
+        sheet.getRow(1).font = { bold: true };
+        (payload.branchRows ?? []).forEach((b, i) => {
+          sheet.addRow({
+            sno: i + 1,
+            branch: b.branchName,
+            patients: b.totalPatients,
+            op: b.transactions,
+            billed: b.totalBilled,
+            paid: b.totalPaid,
+            due: b.totalDue,
+          });
+        });
+        if ((payload.branchRows ?? []).length === 0) {
+          sheet.addRow({ sno: 1, branch: 'No data', patients: 0, op: 0, billed: 0, paid: 0, due: 0 });
+        }
+      } else {
+        const sheet = workbook.addWorksheet('Payment Method Revenue');
+        sheet.columns = [
+          { header: 'S.No.', key: 'sno', width: 6 },
+          { header: 'Payment Method', key: 'method', width: 24 },
+          { header: 'Transaction Count', key: 'txn', width: 18 },
+          { header: 'Total Billing (₹)', key: 'billed', width: 18 },
+          { header: 'Paid / Collected (₹)', key: 'paid', width: 20 },
+          { header: 'Due (₹)', key: 'due', width: 14 },
+        ];
+        sheet.getRow(1).font = { bold: true };
+        (payload.methodRows ?? []).forEach((m, i) => {
+          sheet.addRow({
+            sno: i + 1,
+            method: m.methodName,
+            txn: m.transactions,
+            billed: m.billed,
+            paid: m.revenue,
+            due: m.due,
+          });
+        });
+        if ((payload.methodRows ?? []).length === 0) {
+          sheet.addRow({ sno: 1, method: 'No data', txn: 0, billed: 0, paid: 0, due: 0 });
+        }
+      }
+
+      const buf = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const label = kind === 'branch' ? 'Branch Revenue' : 'Payment Method Revenue';
+      a.download = `${label.toLowerCase().replace(/ /g, '-')}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`${label} exported as Excel (.xlsx)`);
+      setExportOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExporting(null);
+    }
+  };
+
   const s = data?.summary;
 
   return (
@@ -117,12 +209,20 @@ export default function AdminRevenuePage() {
             </select>
           </div>
         </div>
-        <button
-          onClick={reset}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-        >
-          <RotateCcw className="h-4 w-4" /> Reset
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={reset}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            <RotateCcw className="h-4 w-4" /> Reset
+          </button>
+          <button
+            onClick={() => setExportOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
+          >
+            <Download className="h-4 w-4" /> Export Data
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
@@ -210,6 +310,48 @@ export default function AdminRevenuePage() {
           </div>
         </div>
       </div>
+
+      {exportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">Export Data (Excel)</h3>
+              <button onClick={() => setExportOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mb-4 text-xs text-slate-500">
+              Export the current filtered data as <b>.xlsx</b> (Microsoft Excel). Choose the export structure.
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => void runExport('branch')}
+                disabled={exporting === 'branch'}
+                className="flex w-full items-center gap-3 rounded-xl border border-slate-200 p-3 text-left hover:border-emerald-400 hover:bg-emerald-50 disabled:opacity-50"
+              >
+                <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Branch-wise Export</span>
+                  <span className="block text-xs text-slate-500">S.No, Branch, Patients, OPs, Billed, Paid, Due</span>
+                </span>
+                {exporting === 'branch' && <Loader2 className="ml-auto h-4 w-4 animate-spin text-emerald-600" />}
+              </button>
+              <button
+                onClick={() => void runExport('method')}
+                disabled={exporting === 'method'}
+                className="flex w-full items-center gap-3 rounded-xl border border-slate-200 p-3 text-left hover:border-emerald-400 hover:bg-emerald-50 disabled:opacity-50"
+              >
+                <Wallet className="h-5 w-5 text-emerald-600" />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Payment Method-wise Export</span>
+                  <span className="block text-xs text-slate-500">S.No, Method, Transactions, Billed, Paid, Due</span>
+                </span>
+                {exporting === 'method' && <Loader2 className="ml-auto h-4 w-4 animate-spin text-emerald-600" />}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

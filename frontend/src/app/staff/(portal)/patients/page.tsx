@@ -2,22 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, Receipt, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Receipt, Search, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { staffFetch } from '@/lib/staff-auth';
-import { opStatus } from '@/lib/site-data';
-
-interface Patient {
-  _id: string;
-  name: string;
-  mobile: string;
-  opdNumber: string;
-  status: string;
-  billingStatus: string;
-  total?: number;
-  createdAt: string;
-  branch?: { name: string };
-  department?: { name: string };
-}
+import type { Patient } from '@/types';
 
 interface ListRes {
   data: { data: Patient[]; total: number; totalPages: number; page: number; limit: number };
@@ -30,9 +17,11 @@ export default function StaffPatients() {
   const [totalPages, setTotalPages] = useState(1);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError('');
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (search.trim()) params.set('search', search.trim());
@@ -42,7 +31,7 @@ export default function StaffPatients() {
       setTotal(payload.total || 0);
       setTotalPages(payload.totalPages || 1);
     } catch {
-      /* ignore */
+      setError('Unable to load patients. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -55,7 +44,7 @@ export default function StaffPatients() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative sm:max-w-sm sm:flex-1">
+        <div className="relative sm:max-w-md sm:flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={search}
@@ -63,7 +52,7 @@ export default function StaffPatients() {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Search by name, mobile, OP no…"
+            placeholder="Search by name, mobile, UHID, OP no…"
             className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
           />
         </div>
@@ -71,55 +60,90 @@ export default function StaffPatients() {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
-              <th className="px-4 py-3 font-semibold">OP No.</th>
-              <th className="px-4 py-3 font-semibold">Patient</th>
-              <th className="px-4 py-3 font-semibold">Mobile</th>
-              <th className="px-4 py-3 font-semibold">Branch</th>
-              <th className="px-4 py-3 font-semibold">Department</th>
-              <th className="px-4 py-3 font-semibold">Amount</th>
-              <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 text-right font-semibold">Action</th>
+        <table className="w-full min-w-[1300px] text-left text-xs">
+          <thead className="bg-slate-50">
+            <tr className="text-[10px] uppercase tracking-wider text-slate-500">
+              <th className="px-3 py-2.5 font-semibold">S.No</th>
+              <th className="px-3 py-2.5 font-semibold">C/H</th>
+              <th className="px-3 py-2.5 font-semibold">F/N</th>
+              <th className="px-3 py-2.5 font-semibold">UHID</th>
+              <th className="px-3 py-2.5 font-semibold">Patient Name</th>
+              <th className="px-3 py-2.5 font-semibold">Age</th>
+              <th className="px-3 py-2.5 font-semibold">Gender</th>
+              <th className="px-3 py-2.5 font-semibold">Diagnosis</th>
+              <th className="px-3 py-2.5 font-semibold">Treatment</th>
+              <th className="px-3 py-2.5 font-semibold">Branch</th>
+              <th className="px-3 py-2.5 font-semibold">Department</th>
+              <th className="px-3 py-2.5 font-semibold">Doctor</th>
+              <th className="px-3 py-2.5 font-semibold">OP</th>
+              <th className="px-3 py-2.5 font-semibold">Phone</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Pharma</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Lab</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Advance</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Due</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Total</th>
+              <th className="px-3 py-2.5 font-semibold">No. Days</th>
+              <th className="px-3 py-2.5 font-semibold">Signature</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
+                <td colSpan={22} className="px-4 py-12 text-center text-slate-400">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
+                  <p className="mt-2">Loading patients...</p>
                 </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={22} className="px-4 py-12 text-center text-red-500">{error}</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
-                  No patients found.
-                </td>
+                <td colSpan={22} className="px-4 py-12 text-center text-slate-400">No patients found.</td>
               </tr>
             ) : (
-              rows.map((p) => {
-                const st = opStatus(p.status);
+              rows.map((p, i) => {
+                const lv = p.lastVisit || null;
                 return (
                   <tr key={p._id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-600">{p.opdNumber}</td>
-                    <td className="px-4 py-3 font-medium text-slate-800">{p.name}</td>
-                    <td className="px-4 py-3 text-slate-600">{p.mobile}</td>
-                    <td className="px-4 py-3 text-slate-600">{p.branch?.name || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{p.department?.name || '—'}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-800">₹{(p.total || 0).toLocaleString()}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${st.bg} ${st.color}`}>
-                        {st.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/staff/patients/${p._id}/invoice`}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700"
-                      >
-                        <Receipt className="h-3.5 w-3.5" /> Invoice
-                      </Link>
+                    <td className="px-3 py-2.5 text-slate-500">{(page - 1) * 20 + i + 1}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.cH || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.fN || '—'}</td>
+                    <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{p.uhid || '—'}</td>
+                    <td className="px-3 py-2.5 font-medium text-slate-800">{p.name}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.age ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.gender || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.diagnosis || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.treatment || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.branch?.name || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.department?.name || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.doctor?.name || '—'}</td>
+                    <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{lv?.opNumber || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.mobile || '—'}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">{inr(lv?.charges?.pharmacy)}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">{inr(lv?.charges?.lab)}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">{inr(lv?.payment?.advanced)}</td>
+                    <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(lv ? lv.payment?.due : p.outstanding)}</td>
+                    <td className="px-3 py-2.5 text-right font-semibold text-slate-800">{inr(lv?.charges?.total)}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.noOfDays ?? 0}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.signature || '—'}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <div className="inline-flex items-center gap-1">
+                        <Link
+                          href={`/staff/patients/${p._id}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          <Eye className="h-3 w-3" /> View
+                        </Link>
+                        <Link
+                          href={`/staff/patients/${p._id}/invoice`}
+                          className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-teal-700"
+                        >
+                          <Receipt className="h-3 w-3" /> Invoice
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -129,9 +153,7 @@ export default function StaffPatients() {
         </table>
 
         <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
-          <p className="text-xs text-slate-500">
-            Page {page} of {totalPages}
-          </p>
+          <p className="text-xs text-slate-500">Page {page} of {totalPages}</p>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -154,4 +176,8 @@ export default function StaffPatients() {
       </div>
     </div>
   );
+}
+
+function inr(n: number | undefined): string {
+  return `₹${Math.round(n || 0).toLocaleString('en-IN')}`;
 }

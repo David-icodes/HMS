@@ -74,7 +74,7 @@ export default function StaffLoginPage() {
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="staff"
+              placeholder="Enter username"
               autoComplete="username"
               className="w-full rounded-lg border border-white/10 bg-white/10 py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-500 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
             />
@@ -109,10 +109,6 @@ export default function StaffLoginPage() {
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             {loading ? 'Signing in…' : 'Sign in to Staff Portal'}
           </button>
-
-          <p className="mt-4 text-center text-[11px] text-slate-500">
-            Default staff login: <span className="text-slate-300">staff / 2026</span>
-          </p>
         </form>
 
         <Link

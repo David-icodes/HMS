@@ -130,7 +130,7 @@ export default function OpListPage() {
                 return (
                   <tr key={v._id} className="hover:bg-slate-50">
                     <td className="px-3 py-2.5 text-slate-500">{(page - 1) * 25 + i + 1}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{pat?.cH || v.charges?.opConsultation ? 'Cash' : '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{pat?.cH || (v.charges?.opConsultation ? 'Client' : '—')}</td>
                     <td className="px-3 py-2.5 text-slate-600">{pat?.fN || '—'}</td>
                     <td className="px-3 py-2.5 font-medium text-slate-800">{pat?.name || '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600">{pat?.age ?? '—'}</td>

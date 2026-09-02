@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, Plus, Printer, Save, Trash2, Receipt } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Printer, Save, Trash2, Receipt, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { staffFetch } from '@/lib/staff-auth';
 import type { Invoice } from '@/types';
@@ -71,6 +71,23 @@ export default function InvoicePage() {
         idx === i ? { ...it, [field]: field === 'description' ? value : Number(value) || 0 } : it,
       ),
     );
+  };
+
+  const announce = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      toast.error('Voice announcement not supported in this browser');
+      return;
+    }
+    const amount = Math.round(total);
+    const text = `Bill amount is ${amountInWords(amount)} rupees.`;
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find((v) => /en(-|_)?in/i.test(v.lang)) || voices.find((v) => v.lang === 'en-US') || voices[0];
+    if (preferred) utterance.voice = preferred;
+    utterance.rate = 0.95;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    toast.success(`Announcing ₹${amount.toLocaleString('en-IN')}`);
   };
 
   const generate = async () => {
@@ -266,9 +283,18 @@ export default function InvoicePage() {
           </div>
 
           <button
+            type="button"
+            onClick={announce}
+            disabled={total <= 0}
+            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-semibold text-teal-700 hover:bg-teal-100 disabled:opacity-50"
+          >
+            <Volume2 className="h-4 w-4" /> Announce Bill Amount · ₹{total.toLocaleString('en-IN')}
+          </button>
+
+          <button
             onClick={() => void generate()}
             disabled={generating}
-            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-60"
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-60"
           >
             {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {generating ? 'Generating…' : `Generate Invoice · ₹${total.toLocaleString()}`}
@@ -302,6 +328,38 @@ function SummaryRow({ label, value }: { label: string; value: number }) {
       <span className="font-semibold text-slate-800">₹{value.toLocaleString()}</span>
     </div>
   );
+}
+
+function amountInWords(num: number): string {
+  if (num === 0) return 'zero';
+  const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  const two = (n: number): string => {
+    if (n < 20) return ones[n];
+    return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+  };
+  const three = (n: number): string => {
+    if (n < 100) return two(n);
+    const h = Math.floor(n / 100);
+    const rest = n % 100;
+    return ones[h] + ' hundred' + (rest ? ' and ' + two(rest) : '');
+  };
+  if (num >= 10000000) {
+    const c = Math.floor(num / 10000000);
+    const rest = num % 10000000;
+    return amountInWords(c) + ' crore' + (rest ? ' ' + amountInWords(rest) : '');
+  }
+  if (num >= 100000) {
+    const l = Math.floor(num / 100000);
+    const rest = num % 100000;
+    return amountInWords(l) + ' lakh' + (rest ? ' ' + amountInWords(rest) : '');
+  }
+  if (num >= 1000) {
+    const t = Math.floor(num / 1000);
+    const rest = num % 1000;
+    return amountInWords(t) + ' thousand' + (rest ? ' ' + three(rest) : '');
+  }
+  return three(num);
 }
 
 function InvoiceSheet({ invoice }: { invoice: Invoice }) {

@@ -1,40 +1,19 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, RefreshCw, Search, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import Link from 'next/link';
+import { Loader2, RefreshCw, Search, Download, Eye, Pencil, Trash2, Receipt, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import ExcelJS from 'exceljs';
 import { adminFetch } from '@/lib/admin-auth';
-import { opStatus } from '@/lib/site-data';
-import StatusBadge from '@/components/admin/StatusBadge';
-import type { Branch } from '@/types';
-
-interface Patient {
-  _id: string;
-  name: string;
-  mobile: string;
-  opdNumber: string;
-  status: string;
-  billingStatus: string;
-  amount?: number;
-  total?: number;
-  branch?: { name: string };
-  department?: { name: string };
-  gender?: string;
-  age?: number;
-  source?: string;
-  createdAt: string;
-}
+import type { Branch, Patient } from '@/types';
 
 interface ListRes {
-  data: Patient[];
-  total: number;
-  totalPages: number;
-  page: number;
-  limit: number;
+  data: { data: Patient[]; total: number; totalPages: number; page: number; limit: number };
 }
 
-const STATUS_OPTS = ['', 'registered', 'in-consultation', 'completed', 'cancelled'];
+const inputCls = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
+const fieldCls = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
 
 export default function AdminPatientsPage() {
   const [rows, setRows] = useState<Patient[]>([]);
@@ -43,13 +22,16 @@ export default function AdminPatientsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [search, setSearch] = useState('');
   const [branch, setBranch] = useState('');
-  const [status, setStatus] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'createdAt', dir: 'desc' });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
+
+  const [editing, setEditing] = useState<Patient | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', mobile: '', age: '', gender: '', cH: '', fN: '', address: '' });
 
   useEffect(() => {
     fetch('/api/site/branches')
@@ -61,39 +43,82 @@ export default function AdminPatientsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: '10',
-        sort: sort.dir === 'desc' ? `-${sort.key}` : sort.key,
-      });
+      const params = new URLSearchParams({ page: String(page), limit: '10', sort: '-createdAt' });
       if (search.trim()) params.set('search', search.trim());
       if (branch) params.set('branch', branch);
-      if (status) params.set('status', status);
       if (from) params.set('from', from);
       if (to) params.set('to', to);
       const res = await adminFetch<{ data: ListRes }>(`/api/admin/patients?${params}`);
-      setRows(res.data.data);
-      setTotal(res.data.total);
+      setRows(res.data.data || []);
+      setTotal(res.data.total || 0);
       setTotalPages(res.data.totalPages || 1);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load patients');
     } finally {
       setLoading(false);
     }
-  }, [page, search, branch, status, from, to, sort]);
+  }, [page, search, branch, from, to]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const handleSort = (key: string) => {
-    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
-    setPage(1);
+  const openEdit = (p: Patient) => {
+    setEditForm({
+      name: p.name || '',
+      mobile: p.mobile || '',
+      age: p.age != null ? String(p.age) : '',
+      gender: p.gender || 'Male',
+      cH: p.cH || '',
+      fN: p.fN || '',
+      address: p.address || '',
+    });
+    setEditing(p);
   };
 
-  const sortIcon = (key: string) => {
-    if (sort.key !== key) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
-    return sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editing) return;
+    if (!editForm.name.trim() || !editForm.mobile.trim()) {
+      toast.error('Name and mobile are required');
+      return;
+    }
+    setSaving(true);
+    try {
+      await adminFetch(`/api/admin/patients/${editing._id}`, {
+        method: 'PUT',
+        body: {
+          name: editForm.name.trim(),
+          mobile: editForm.mobile.trim(),
+          age: editForm.age !== '' ? Number(editForm.age) : undefined,
+          gender: editForm.gender,
+          cH: editForm.cH.trim(),
+          fN: editForm.fN.trim(),
+          address: editForm.address.trim(),
+        },
+      });
+      toast.success('Patient updated');
+      setEditing(null);
+      void load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update patient');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (p: Patient) => {
+    if (!window.confirm(`Are you sure you want to delete this patient?\n\n${p.name} (${p.mobile})`)) return;
+    setDeletingId(p._id);
+    try {
+      await adminFetch(`/api/admin/patients/${p._id}`, { method: 'DELETE' });
+      toast.success('Patient deleted');
+      void load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete patient');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleExport = async () => {
@@ -104,38 +129,51 @@ export default function AdminPatientsPage() {
       if (from) params.set('from', from);
       if (to) params.set('to', to);
       const res = await adminFetch<{ data: Patient[] }>(`/api/admin/patients/export?${params}`);
-      const all = res.data || [];
+      const all = Array.isArray(res.data) ? res.data : [];
       const workbook = new ExcelJS.Workbook();
       workbook.created = new Date();
       workbook.creator = 'Urmila Raj Hospital';
       const sheet = workbook.addWorksheet('Patients');
       sheet.columns = [
-        { header: 'OP No.', key: 'opdNumber', width: 18 },
+        { header: 'UHID', key: 'uhid', width: 18 },
         { header: 'Name', key: 'name', width: 24 },
         { header: 'Mobile', key: 'mobile', width: 16 },
+        { header: 'C/H', key: 'cH', width: 10 },
+        { header: 'F/N', key: 'fN', width: 12 },
         { header: 'Gender', key: 'gender', width: 10 },
         { header: 'Age', key: 'age', width: 8 },
+        { header: 'OP No.', key: 'op', width: 16 },
         { header: 'Branch', key: 'branch', width: 20 },
         { header: 'Department', key: 'department', width: 24 },
-        { header: 'Amount (₹)', key: 'amount', width: 12 },
-        { header: 'Status', key: 'status', width: 14 },
-        { header: 'Source', key: 'source', width: 12 },
-        { header: 'Registered', key: 'createdAt', width: 18 },
+        { header: 'Doctor', key: 'doctor', width: 20 },
+        { header: 'Diagnosis', key: 'diagnosis', width: 28 },
+        { header: 'Treatment', key: 'treatment', width: 28 },
+        { header: 'Total (₹)', key: 'total', width: 12 },
+        { header: 'Advance (₹)', key: 'advanced', width: 12 },
+        { header: 'Due (₹)', key: 'due', width: 12 },
+        { header: 'Visits', key: 'visits', width: 8 },
       ];
       sheet.getRow(1).font = { bold: true };
       all.forEach((p) => {
+        const lv = p.lastVisit || null;
         sheet.addRow({
-          opdNumber: p.opdNumber || '',
+          uhid: p.uhid || '',
           name: p.name || '',
           mobile: p.mobile || '',
+          cH: p.cH || '',
+          fN: p.fN || '',
           gender: p.gender || '',
           age: p.age ?? '',
-          branch: p.branch?.name || '',
-          department: p.department?.name || '',
-          amount: p.total ?? p.amount ?? 0,
-          status: p.status || '',
-          source: p.source || '',
-          createdAt: p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '',
+          op: lv?.opNumber || '',
+          branch: lv?.branch?.name || '',
+          department: lv?.department?.name || '',
+          doctor: lv?.doctor?.name || '',
+          diagnosis: lv?.diagnosis || '',
+          treatment: lv?.treatment || '',
+          total: lv?.charges?.total ?? p.outstanding ?? 0,
+          advanced: lv?.payment?.advanced ?? 0,
+          due: lv ? lv.payment?.due : p.outstanding,
+          visits: p.visitCount ?? 0,
         });
       });
       const buf = await workbook.xlsx.writeBuffer();
@@ -158,14 +196,11 @@ export default function AdminPatientsPage() {
     }
   };
 
-  const inputCls =
-    'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
-
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-6">
-          <div className="relative sm:col-span-2 lg:col-span-2">
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <div className="relative min-w-[200px] flex-1 lg:max-w-xs">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
@@ -173,7 +208,7 @@ export default function AdminPatientsPage() {
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              placeholder="Search name, mobile, OP no…"
+              placeholder="Search name, mobile, UHID, OP no…"
               className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-sky-500 focus:outline-none"
             />
           </div>
@@ -183,14 +218,8 @@ export default function AdminPatientsPage() {
               <option key={b._id} value={b._id}>{b.name}</option>
             ))}
           </select>
-          <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className={inputCls}>
-            <option value="">All statuses</option>
-            {STATUS_OPTS.filter(Boolean).map((s) => (
-              <option key={s} value={s}>{opStatus(s).label}</option>
-            ))}
-          </select>
-          <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} className={inputCls} />
-          <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} className={inputCls} />
+          <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} className={inputCls} title="From" />
+          <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} className={inputCls} title="To" />
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -205,54 +234,112 @@ export default function AdminPatientsPage() {
             className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
           >
             {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {exporting ? 'Exporting…' : 'Export All (.xlsx)'}
+            {exporting ? 'Exporting…' : 'Export Data (.xlsx)'}
           </button>
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[1300px] text-left text-xs">
+          <thead className="bg-slate-50">
+            <tr className="text-[10px] uppercase tracking-wider text-slate-500">
+              <th className="px-3 py-2.5 font-semibold">S.No</th>
+              <th className="px-3 py-2.5 font-semibold">C/H</th>
+              <th className="px-3 py-2.5 font-semibold">F/N</th>
+              <th className="px-3 py-2.5 font-semibold">UHID</th>
+              <th className="px-3 py-2.5 font-semibold">Patient Name</th>
+              <th className="px-3 py-2.5 font-semibold">Age</th>
+              <th className="px-3 py-2.5 font-semibold">Gender</th>
+              <th className="px-3 py-2.5 font-semibold">Diagnosis</th>
+              <th className="px-3 py-2.5 font-semibold">Treatment</th>
+              <th className="px-3 py-2.5 font-semibold">Branch</th>
+              <th className="px-3 py-2.5 font-semibold">Department</th>
+              <th className="px-3 py-2.5 font-semibold">Doctor</th>
+              <th className="px-3 py-2.5 font-semibold">OP</th>
+              <th className="px-3 py-2.5 font-semibold">Phone</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Pharma</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Lab</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Advance</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Due</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Total</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {loading ? (
               <tr>
-                <Th label="OP No." onSort={() => handleSort('opdNumber')} icon={sortIcon('opdNumber')} />
-                <Th label="Patient" onSort={() => handleSort('name')} icon={sortIcon('name')} />
-                <Th label="Mobile" onSort={() => handleSort('mobile')} icon={sortIcon('mobile')} />
-                <Th label="Branch" />
-                <Th label="Department" />
-                <Th label="Amount" onSort={() => handleSort('total')} icon={sortIcon('total')} />
-                <Th label="Status" onSort={() => handleSort('status')} icon={sortIcon('status')} />
-                <Th label="Registered" onSort={() => handleSort('createdAt')} icon={sortIcon('createdAt')} />
+                <td colSpan={20} className="px-4 py-12 text-center text-slate-400">
+                  <Loader2 className="mx-auto h-6 w-6 animate-spin text-sky-600" />
+                  <p className="mt-2">Loading patients...</p>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
-                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-sky-600" />
-                  </td>
-                </tr>
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No patients found.</td>
-                </tr>
-              ) : (
-                rows.map((p) => (
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={20} className="px-4 py-12 text-center text-slate-400">No patients found.</td>
+              </tr>
+            ) : (
+              rows.map((p, i) => {
+                const lv = p.lastVisit || null;
+                return (
                   <tr key={p._id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-600">{p.opdNumber}</td>
-                    <td className="px-4 py-3 font-medium text-slate-800">{p.name}</td>
-                    <td className="px-4 py-3 text-slate-600">{p.mobile}</td>
-                    <td className="px-4 py-3 text-slate-600">{p.branch?.name || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{p.department?.name || '—'}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-800">₹{(p.total ?? p.amount ?? 0).toLocaleString()}</td>
-                    <td className="px-4 py-3"><StatusBadge value={p.status} /></td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{new Date(p.createdAt).toLocaleDateString()}</td>
+                    <td className="px-3 py-2.5 text-slate-500">{(page - 1) * 10 + i + 1}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.cH || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.fN || '—'}</td>
+                    <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{p.uhid || '—'}</td>
+                    <td className="px-3 py-2.5 font-medium text-slate-800">{p.name}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.age ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.gender || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.diagnosis || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.treatment || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.branch?.name || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.department?.name || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{lv?.doctor?.name || '—'}</td>
+                    <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{lv?.opNumber || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p.mobile || '—'}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">{inr(lv?.charges?.pharmacy)}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">{inr(lv?.charges?.lab)}</td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">{inr(lv?.payment?.advanced)}</td>
+                    <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(lv ? lv.payment?.due : p.outstanding)}</td>
+                    <td className="px-3 py-2.5 text-right font-semibold text-slate-800">{inr(lv?.charges?.total)}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <div className="inline-flex items-center gap-1">
+                        <Link
+                          href={`/admin/patients/${p._id}`}
+                          className="rounded-md p-1.5 text-slate-500 hover:bg-sky-50 hover:text-sky-600"
+                          aria-label="View"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Link>
+                        <button
+                          onClick={() => openEdit(p)}
+                          className="rounded-md p-1.5 text-slate-500 hover:bg-sky-50 hover:text-sky-600"
+                          aria-label="Edit"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => void remove(p)}
+                          disabled={deletingId === p._id}
+                          className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                          aria-label="Delete"
+                        >
+                          {deletingId === p._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        </button>
+                        <Link
+                          href={`/staff/patients/${p._id}/invoice`}
+                          className="rounded-md p-1.5 text-slate-500 hover:bg-teal-50 hover:text-teal-600"
+                          aria-label="Invoice"
+                        >
+                          <Receipt className="h-3.5 w-3.5" />
+                        </Link>
+                      </div>
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                );
+              })
+            )}
+          </tbody>
+        </table>
 
         <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
           <p className="text-xs text-slate-500">{total} patient{total === 1 ? '' : 's'}</p>
@@ -277,20 +364,70 @@ export default function AdminPatientsPage() {
           </div>
         </div>
       </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <form onSubmit={(e) => void saveEdit(e)} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">Edit Patient</h3>
+              <button type="button" onClick={() => setEditing(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">Name *</label>
+                <input className={fieldCls} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">Mobile *</label>
+                <input className={fieldCls} value={editForm.mobile} onChange={(e) => setEditForm({ ...editForm, mobile: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">Age</label>
+                <input className={fieldCls} type="number" min={0} value={editForm.age} onChange={(e) => setEditForm({ ...editForm, age: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">Gender</label>
+                <select className={fieldCls} value={editForm.gender} onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">C/H (Client/Home)</label>
+                <input className={fieldCls} value={editForm.cH} onChange={(e) => setEditForm({ ...editForm, cH: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">F/N</label>
+                <input className={fieldCls} value={editForm.fN} onChange={(e) => setEditForm({ ...editForm, fN: e.target.value })} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-medium text-slate-500">Address</label>
+                <input className={fieldCls} value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setEditing(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
 
-function Th({ label, onSort, icon }: { label: string; onSort?: () => void; icon?: React.ReactNode }) {
-  return (
-    <th className="px-4 py-3 font-semibold">
-      {onSort ? (
-        <button onClick={onSort} className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700">
-          {label}{icon}
-        </button>
-      ) : (
-        label
-      )}
-    </th>
-  );
+function inr(n: number | undefined): string {
+  return `₹${Math.round(n || 0).toLocaleString('en-IN')}`;
 }

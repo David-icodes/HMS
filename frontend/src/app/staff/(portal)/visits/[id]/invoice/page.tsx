@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, Printer, Receipt } from 'lucide-react';
+import { ArrowLeft, Loader2, Printer, Receipt, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { staffFetch } from '@/lib/staff-auth';
 import { inr } from '@/lib/billing';
@@ -61,6 +61,23 @@ export default function VisitInvoicePage() {
     }
   };
 
+  const announce = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      toast.error('Voice announcement not supported in this browser');
+      return;
+    }
+    const amount = Math.round(visit?.charges?.total || 0);
+    const text = `Bill amount is ${amountInWords(amount)} rupees.`;
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find((v) => /en(-|_)?in/i.test(v.lang)) || voices.find((v) => v.lang === 'en-US') || voices[0];
+    if (preferred) utterance.voice = preferred;
+    utterance.rate = 0.95;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    toast.success(`Announcing ₹${amount.toLocaleString('en-IN')}`);
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center text-slate-400">
@@ -93,14 +110,24 @@ export default function VisitInvoicePage() {
                 {visit.branch?.name || '—'}
               </p>
             </div>
-            <button
-              onClick={() => void generate()}
-              disabled={generating}
-              className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
-            >
-              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
-              {generating ? 'Generating…' : 'Generate Invoice'}
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={announce}
+                disabled={!visit.charges?.total}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-semibold text-teal-700 hover:bg-teal-100 disabled:opacity-50"
+              >
+                <Volume2 className="h-4 w-4" /> Announce Amount
+              </button>
+              <button
+                onClick={() => void generate()}
+                disabled={generating}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
+              >
+                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
+                {generating ? 'Generating…' : 'Generate Invoice'}
+              </button>
+            </div>
           </div>
 
           <div className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
@@ -253,6 +280,38 @@ function VisitInvoiceSheet({ visit, invoice }: { visit: Visit; invoice: Invoice 
       </div>
     </div>
   );
+}
+
+function amountInWords(num: number): string {
+  if (num === 0) return 'zero';
+  const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  const two = (n: number): string => {
+    if (n < 20) return ones[n];
+    return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+  };
+  const three = (n: number): string => {
+    if (n < 100) return two(n);
+    const h = Math.floor(n / 100);
+    const rest = n % 100;
+    return ones[h] + ' hundred' + (rest ? ' and ' + two(rest) : '');
+  };
+  if (num >= 10000000) {
+    const c = Math.floor(num / 10000000);
+    const rest = num % 10000000;
+    return amountInWords(c) + ' crore' + (rest ? ' ' + amountInWords(rest) : '');
+  }
+  if (num >= 100000) {
+    const l = Math.floor(num / 100000);
+    const rest = num % 100000;
+    return amountInWords(l) + ' lakh' + (rest ? ' ' + amountInWords(rest) : '');
+  }
+  if (num >= 1000) {
+    const t = Math.floor(num / 1000);
+    const rest = num % 1000;
+    return amountInWords(t) + ' thousand' + (rest ? ' ' + three(rest) : '');
+  }
+  return three(num);
 }
 
 function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {

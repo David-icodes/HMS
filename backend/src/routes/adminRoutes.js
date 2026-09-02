@@ -34,6 +34,7 @@ const {
 } = require('../controllers/admin/analyticsController');
 const {
   listMasterPatients,
+  getMasterPatient,
   exportMasterPatients,
   updateMasterPatient,
   deleteMasterPatient,
@@ -54,6 +55,7 @@ router.get('/activity-logs', authorize('superAdmin', 'admin'), getActivityLogs);
 router.get('/revenue', authorize('superAdmin', 'admin'), revenueReport);
 router.get('/patients', authorize('superAdmin', 'admin', 'receptionist'), listMasterPatients);
 router.get('/patients/export', authorize('superAdmin', 'admin'), exportMasterPatients);
+router.get('/patients/:id', authorize('superAdmin', 'admin'), getMasterPatient);
 router.put('/patients/:id', authorize('superAdmin', 'admin'), updateMasterPatient);
 router.delete('/patients/:id', authorize('superAdmin', 'admin'), deleteMasterPatient);
 

@@ -8,7 +8,7 @@ const patientSchema = new mongoose.Schema(
     mobile: { type: String, required: true, trim: true },
     age: { type: Number, min: 0, max: 130 },
     gender: { type: String, enum: ['Male', 'Female', 'Other'], default: 'Male' },
-    // C/H = Cash / Hospital (or payer type) - free text kept generic per spec
+    // C/H = Client / Home
     cH: { type: String, trim: true },
     // F/N = Follow / Not Follow
     fN: { type: String, enum: ['Follow', 'Not Follow', ''], default: '' },

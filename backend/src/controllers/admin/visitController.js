@@ -436,7 +436,10 @@ const buildPatientRows = async (patients) => {
   const [visits, outstandingAgg] = await Promise.all([
     Visit.find({ patient: { $in: ids } })
       .sort({ visitDate: -1 })
-      .select('patient visitDate visitType department doctor opNumber charges payment.received payment.advanced payment.due payment.status')
+      .select(
+        'patient visitDate visitType branch department doctor opNumber diagnosis treatment noOfDays signature referralDoctor charges payment.received payment.advanced payment.due payment.status'
+      )
+      .populate('branch', 'name')
       .populate('department', 'name')
       .populate('doctor', 'name')
       .lean(),
@@ -508,7 +511,13 @@ const getMasterPatient = asyncHandler(async (req, res) => {
   const patient = await Patient.findById(req.params.id);
   if (!patient) throw new ApiError(404, 'Patient not found');
   const [rows] = await buildPatientRows([patient]);
-  res.status(200).json(new ApiResponse(200, rows));
+  const visits = await Visit.find({ patient: patient._id })
+    .sort({ visitDate: -1 })
+    .populate('branch', 'name')
+    .populate('department', 'name')
+    .populate('doctor', 'name')
+    .populate('payment.method', 'name');
+  res.status(200).json(new ApiResponse(200, { patient: rows, visits }));
 });
 
 // ---------- Update master patient (admin only) ----------
