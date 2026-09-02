@@ -322,6 +322,7 @@ export interface Visit {
   createdBy?: { _id: string; name: string } | null;
   signature?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface HomeVisit {

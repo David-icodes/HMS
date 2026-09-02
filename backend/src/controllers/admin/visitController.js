@@ -261,6 +261,63 @@ const updateVisit = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, { visit: full }, 'Visit updated'));
 });
 
+// ---------- Admin: update a specific visit AND its patient (full OP edit) ----------
+// Preserves opNumber, uhid, createdBy and created/updated timestamps. Updates only the
+// targeted visit document and its linked patient; never creates duplicates.
+const adminUpdateVisit = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid visit id');
+  const visit = await Visit.findById(req.params.id);
+  if (!visit) throw new ApiError(404, 'Visit not found');
+
+  // Patient updates (safe: never regenerate uhid)
+  const pbody = req.body.patient || {};
+  if (visit.patient) {
+    const patient = await Patient.findById(visit.patient);
+    if (!patient) throw new ApiError(404, 'Patient not found');
+    if (pbody.name !== undefined) patient.name = String(pbody.name).trim();
+    if (pbody.mobile !== undefined) {
+      const mobile = String(pbody.mobile).trim();
+      if (mobile && mobile !== patient.mobile) {
+        const dup = await Patient.findOne({ mobile, _id: { $ne: patient._id } });
+        if (dup) throw new ApiError(400, 'Another patient already uses this mobile number');
+      }
+      patient.mobile = mobile;
+    }
+    if (pbody.age !== undefined) patient.age = pbody.age === '' || pbody.age == null ? null : Number(pbody.age);
+    if (pbody.gender !== undefined) patient.gender = pbody.gender;
+    if (pbody.cH !== undefined) patient.cH = pbody.cH || '';
+    if (pbody.fN !== undefined) patient.fN = pbody.fN || '';
+    if (pbody.address !== undefined) patient.address = pbody.address || '';
+    await patient.save();
+  }
+
+  // Visit updates
+  const v = req.body.visit || req.body;
+  for (const f of ['visitDate', 'visitType', 'branch', 'department', 'doctor', 'referralDoctor', 'concern', 'diagnosis', 'treatment', 'noOfDays', 'notes', 'signature']) {
+    if (v[f] !== undefined) visit[f] = v[f];
+  }
+
+  if (req.body.charges || req.body.payment) {
+    const charges = sanitizeCharges(req.body.charges || visit.charges);
+    const advanced = req.body.payment?.advanced !== undefined ? Number(req.body.payment.advanced) : visit.payment.advanced;
+    const method = await resolvePaymentMethod(req.body.payment?.method ?? visit.payment.method);
+    const pay = billing.computePayment(charges.total, advanced, method.name);
+    visit.charges = charges;
+    visit.payment = {
+      advanced: pay.advanced,
+      method: method.id,
+      methodName: method.name,
+      due: pay.due,
+      status: pay.status,
+    };
+  }
+
+  await visit.save();
+  const full = await Visit.findById(visit._id).populate(VISIT_POPULATE);
+  await logActivity({ req, action: 'update_visit', entity: 'visit', entityId: visit._id, details: { op: visit.opNumber } });
+  res.status(200).json(new ApiResponse(200, { visit: full }, 'OP updated'));
+});
+
 // ---------- Generate invoice for a visit ----------
 const generateVisitInvoice = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid visit id');
@@ -583,6 +640,7 @@ module.exports = {
   listVisits,
   getVisit,
   updateVisit,
+  adminUpdateVisit,
   generateVisitInvoice,
   getPatient,
   createHomeVisit,

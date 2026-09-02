@@ -39,6 +39,8 @@ const {
   updateMasterPatient,
   deleteMasterPatient,
   listVisits,
+  adminUpdateVisit,
+  listPaymentMethods,
 } = require('../controllers/admin/visitController');
 const { createUserValidator, updateUserValidator } = require('../validators/authValidator');
 const { idValidator, modelValidator } = require('../validators/siteValidator');
@@ -55,6 +57,8 @@ router.get('/activity-logs', authorize('superAdmin', 'admin'), getActivityLogs);
 
 router.get('/revenue', authorize('superAdmin', 'admin'), revenueReport);
 router.get('/visits', authorize('superAdmin', 'admin', 'receptionist'), listVisits);
+router.put('/visits/:id', authorize('superAdmin', 'admin'), adminUpdateVisit);
+router.get('/payment-methods', authorize('superAdmin', 'admin'), listPaymentMethods);
 router.get('/patients', authorize('superAdmin', 'admin', 'receptionist'), listMasterPatients);
 router.get('/patients/export', authorize('superAdmin', 'admin'), exportMasterPatients);
 router.get('/patients/:id', authorize('superAdmin', 'admin'), getMasterPatient);

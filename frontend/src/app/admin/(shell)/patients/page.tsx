@@ -6,6 +6,7 @@ import { Loader2, RefreshCw, Search, Download, Eye, Pencil, Trash2, X, ChevronLe
 import { toast } from 'sonner';
 import ExcelJS from 'exceljs';
 import { adminFetch } from '@/lib/admin-auth';
+import VisitEditForm from '@/components/admin/VisitEditForm';
 import type { Branch, Patient, Visit } from '@/types';
 
 interface ListRes {
@@ -16,12 +17,7 @@ interface ListRes {
   limit: number;
 }
 
-interface PeopleRes {
-  data: Patient[];
-}
-
 const inputCls = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
-const fieldCls = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
 
 export default function AdminPatientsPage() {
   const [rows, setRows] = useState<Visit[]>([]);
@@ -36,10 +32,8 @@ export default function AdminPatientsPage() {
   const [exporting, setExporting] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
 
-  const [editing, setEditing] = useState<Patient | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', mobile: '', age: '', gender: '', cH: '', fN: '', address: '' });
 
   useEffect(() => {
     fetch('/api/site/branches')
@@ -75,49 +69,7 @@ export default function AdminPatientsPage() {
   const patientOf = (v: Visit): Patient | null =>
     v.patient && typeof v.patient === 'object' ? (v.patient as Patient) : null;
 
-  const openEdit = (p: Patient) => {
-    setEditForm({
-      name: p.name || '',
-      mobile: p.mobile || '',
-      age: p.age != null ? String(p.age) : '',
-      gender: p.gender || 'Male',
-      cH: p.cH || '',
-      fN: p.fN || '',
-      address: p.address || '',
-    });
-    setEditing(p);
-  };
-
-  const saveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editing) return;
-    if (!editForm.name.trim() || !editForm.mobile.trim()) {
-      toast.error('Name and mobile are required');
-      return;
-    }
-    setSaving(true);
-    try {
-      await adminFetch(`/api/admin/patients/${editing._id}`, {
-        method: 'PUT',
-        body: {
-          name: editForm.name.trim(),
-          mobile: editForm.mobile.trim(),
-          age: editForm.age !== '' ? Number(editForm.age) : undefined,
-          gender: editForm.gender,
-          cH: editForm.cH.trim(),
-          fN: editForm.fN.trim(),
-          address: editForm.address.trim(),
-        },
-      });
-      toast.success('Patient updated');
-      setEditing(null);
-      void load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update patient');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const openEdit = (v: Visit) => setEditingVisit(v);
 
   const remove = async (v: Visit) => {
     const p = patientOf(v);
@@ -310,7 +262,7 @@ export default function AdminPatientsPage() {
                           <Eye className="h-3.5 w-3.5" />
                         </Link>
                         <button
-                          onClick={() => p && openEdit(p)}
+                          onClick={() => openEdit(v)}
                           className="rounded-md p-1.5 text-slate-500 hover:bg-sky-50 hover:text-sky-600"
                           aria-label="Edit"
                         >
@@ -357,63 +309,29 @@ export default function AdminPatientsPage() {
         </div>
       </div>
 
-      {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <form onSubmit={(e) => void saveEdit(e)} className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900">Edit Patient</h3>
-              <button type="button" onClick={() => setEditing(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
-                <X className="h-4 w-4" />
-              </button>
+      {editingVisit && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/40 p-0 sm:p-4">
+          <div className="mx-auto flex min-h-full w-full max-w-4xl items-start justify-center sm:py-8">
+            <div className="w-full rounded-2xl bg-slate-50 p-4 shadow-xl sm:p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Complete OP Edit</h3>
+                  <p className="text-xs text-slate-500">Editing this OP/Visit. Patient and billing are updated together; no duplicate is created.</p>
+                </div>
+                <button type="button" onClick={() => setEditingVisit(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-700">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <VisitEditForm
+                visit={editingVisit}
+                onSaved={() => {
+                  setEditingVisit(null);
+                  void load();
+                }}
+                onCancel={() => setEditingVisit(null)}
+              />
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Name *</label>
-                <input className={fieldCls} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Mobile *</label>
-                <input className={fieldCls} value={editForm.mobile} onChange={(e) => setEditForm({ ...editForm, mobile: e.target.value })} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Age</label>
-                <input className={fieldCls} type="number" min={0} value={editForm.age} onChange={(e) => setEditForm({ ...editForm, age: e.target.value })} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Gender</label>
-                <select className={fieldCls} value={editForm.gender} onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">C/H (Clinic/Home)</label>
-                <input className={fieldCls} value={editForm.cH} onChange={(e) => setEditForm({ ...editForm, cH: e.target.value })} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">F/N</label>
-                <input className={fieldCls} value={editForm.fN} onChange={(e) => setEditForm({ ...editForm, fN: e.target.value })} />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="mb-1 block text-xs font-medium text-slate-500">Address</label>
-                <input className={fieldCls} value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
-              </div>
-            </div>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button type="button" onClick={() => setEditing(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
       )}
     </div>
