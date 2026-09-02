@@ -9,7 +9,11 @@ import { adminFetch } from '@/lib/admin-auth';
 import type { Branch, Patient } from '@/types';
 
 interface ListRes {
-  data: { data: Patient[]; total: number; totalPages: number; page: number; limit: number };
+  data: Patient[];
+  total: number;
+  totalPages: number;
+  page: number;
+  limit: number;
 }
 
 const inputCls = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
