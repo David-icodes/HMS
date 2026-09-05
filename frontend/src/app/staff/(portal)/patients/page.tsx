@@ -71,6 +71,7 @@ export default function StaffPatients() {
               <th className="px-3 py-2.5 font-semibold">OP No.</th>
               <th className="px-3 py-2.5 font-semibold">Patient</th>
               <th className="px-3 py-2.5 font-semibold">Mobile</th>
+              <th className="px-3 py-2.5 font-semibold">C/H</th>
               <th className="px-3 py-2.5 font-semibold">Department</th>
               <th className="px-3 py-2.5 font-semibold">Doctor</th>
               <th className="px-3 py-2.5 text-right font-semibold">Amount</th>
@@ -83,18 +84,18 @@ export default function StaffPatients() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={12} className="px-4 py-12 text-center text-slate-400">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
                   <p className="mt-2">Loading patients...</p>
                 </td>
               </tr>
             ) : error ? (
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-red-500">{error}</td>
+                <td colSpan={12} className="px-4 py-12 text-center text-red-500">{error}</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={12} className="px-4 py-12 text-center text-slate-400">
                   No OP records found.
                 </td>
               </tr>
@@ -107,6 +108,7 @@ export default function StaffPatients() {
                     <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{v.opNumber || '—'}</td>
                     <td className="px-3 py-2.5 font-medium text-slate-800">{pat?.name || '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600">{pat?.mobile || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{pat?.cH || '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600">{v.department?.name || '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600">{v.doctor?.name || '—'}</td>
                     <td className="px-3 py-2.5 text-right text-slate-800">{inr(v.charges?.total)}</td>

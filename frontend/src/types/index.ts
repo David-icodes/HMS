@@ -336,12 +336,18 @@ export interface HomeVisit {
   attendance?: string;
   reason?: string;
   perSession: number;
+  sessions?: number;
+  total?: number;
   advance: number;
   due: number;
+  paymentMethod?: string;
+  paymentStatus?: 'Paid' | 'Partial' | 'Due';
   branch?: { _id: string; name: string } | null;
   therapist?: string;
   referralDoctor?: string;
   staffInTime?: string;
   staffOutTime?: string;
+  invoiceNumber?: string;
+  createdBy?: { _id: string; name: string } | null;
   createdAt: string;
 }

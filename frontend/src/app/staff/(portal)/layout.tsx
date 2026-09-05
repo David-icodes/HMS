@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Loader2, LogOut, LayoutDashboard, Users, Home } from 'lucide-react';
 import { useStaffAuth, fetchStaffMe, STAFF_ROLES } from '@/lib/staff-auth';
+import AttendanceToggle from '@/components/staff/AttendanceToggle';
 
 function titleFor(pathname: string) {
   if (pathname === '/staff') return 'Dashboard';
@@ -93,6 +94,7 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
             </Link>
           </nav>
           <div className="flex items-center gap-3">
+            <AttendanceToggle />
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-slate-800">{user.name}</p>
               <p className="text-[11px] capitalize text-slate-400">{user.role.replace(/([A-Z])/g, ' $1')}</p>

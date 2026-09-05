@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, RefreshCw, Search, Download, Eye, Pencil, Trash2, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, RefreshCw, Search, Download, Eye, Pencil, Trash2, X, ChevronLeft, ChevronRight, CalendarDays, Users as UsersIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import ExcelJS from 'exceljs';
 import { adminFetch } from '@/lib/admin-auth';
 import VisitEditForm from '@/components/admin/VisitEditForm';
+import DailyRegister from '@/components/admin/DailyRegister';
 import type { Branch, Patient, Visit } from '@/types';
 
 interface ListRes {
@@ -20,6 +21,7 @@ interface ListRes {
 const inputCls = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
 
 export default function AdminPatientsPage() {
+  const [view, setView] = useState<'op' | 'register'>('op');
   const [rows, setRows] = useState<Visit[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -167,6 +169,29 @@ export default function AdminPatientsPage() {
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
+        <button
+          onClick={() => setView('op')}
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+            view === 'op' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <UsersIcon className="h-4 w-4" /> OP List
+        </button>
+        <button
+          onClick={() => setView('register')}
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+            view === 'register' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <CalendarDays className="h-4 w-4" /> Daily Register
+        </button>
+      </div>
+
+      {view === 'register' ? (
+        <DailyRegister />
+      ) : (
+      <>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-1 flex-wrap items-center gap-2">
           <div className="relative min-w-[200px] flex-1 lg:max-w-xs">
@@ -216,6 +241,7 @@ export default function AdminPatientsPage() {
               <th className="px-3 py-2.5 font-semibold">OP No.</th>
               <th className="px-3 py-2.5 font-semibold">Patient</th>
               <th className="px-3 py-2.5 font-semibold">Mobile</th>
+              <th className="px-3 py-2.5 font-semibold">C/H</th>
               <th className="px-3 py-2.5 font-semibold">Department</th>
               <th className="px-3 py-2.5 font-semibold">Doctor</th>
               <th className="px-3 py-2.5 text-right font-semibold">Amount</th>
@@ -228,14 +254,14 @@ export default function AdminPatientsPage() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={12} className="px-4 py-12 text-center text-slate-400">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-sky-600" />
                   <p className="mt-2">Loading patients...</p>
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-slate-400">No OP records found.</td>
+                <td colSpan={12} className="px-4 py-12 text-center text-slate-400">No OP records found.</td>
               </tr>
             ) : (
               rows.map((v, i) => {
@@ -246,6 +272,7 @@ export default function AdminPatientsPage() {
                     <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{v.opNumber || '—'}</td>
                     <td className="px-3 py-2.5 font-medium text-slate-800">{p?.name || '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600">{p?.mobile || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{p?.cH || '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600">{v.department?.name || '—'}</td>
                     <td className="px-3 py-2.5 text-slate-600">{v.doctor?.name || '—'}</td>
                     <td className="px-3 py-2.5 text-right text-slate-800">{inr(v.charges?.total)}</td>
@@ -333,6 +360,8 @@ export default function AdminPatientsPage() {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

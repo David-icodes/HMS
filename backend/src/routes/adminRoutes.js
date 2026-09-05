@@ -41,7 +41,25 @@ const {
   listVisits,
   adminUpdateVisit,
   listPaymentMethods,
+  createHomeVisit,
+  listHomeVisits,
+  getHomeVisit,
+  updateHomeVisit,
+  deleteHomeVisit,
+  generateHomeVisitInvoice,
 } = require('../controllers/admin/visitController');
+const {
+  dailyRegister,
+  staffActivity,
+  staffActivityDetail,
+} = require('../controllers/admin/reportController');
+const {
+  markIn,
+  markOut,
+  myAttendance,
+  listAttendance,
+  listStaffForAttendance,
+} = require('../controllers/admin/attendanceController');
 const { createUserValidator, updateUserValidator } = require('../validators/authValidator');
 const { idValidator, modelValidator } = require('../validators/siteValidator');
 
@@ -64,6 +82,23 @@ router.get('/patients/export', authorize('superAdmin', 'admin'), exportMasterPat
 router.get('/patients/:id', authorize('superAdmin', 'admin'), getMasterPatient);
 router.put('/patients/:id', authorize('superAdmin', 'admin'), updateMasterPatient);
 router.delete('/patients/:id', authorize('superAdmin', 'admin'), deleteMasterPatient);
+
+// Home Visits (admin full management)
+router.get('/home-visits', authorize('superAdmin', 'admin'), listHomeVisits);
+router.get('/home-visits/:id', authorize('superAdmin', 'admin'), getHomeVisit);
+router.post('/home-visits', authorize('superAdmin', 'admin'), createHomeVisit);
+router.put('/home-visits/:id', authorize('superAdmin', 'admin'), updateHomeVisit);
+router.delete('/home-visits/:id', authorize('superAdmin', 'admin'), deleteHomeVisit);
+router.post('/home-visits/:id/invoice', authorize('superAdmin', 'admin'), generateHomeVisitInvoice);
+
+// Reports (admin)
+router.get('/daily-register', authorize('superAdmin', 'admin'), dailyRegister);
+router.get('/staff-activity', authorize('superAdmin', 'admin'), staffActivity);
+router.get('/staff-activity/detail', authorize('superAdmin', 'admin'), staffActivityDetail);
+
+// Staff attendance (admin views)
+router.get('/attendance', authorize('superAdmin', 'admin'), listAttendance);
+router.get('/attendance/staff-list', authorize('superAdmin', 'admin'), listStaffForAttendance);
 
 router.get('/analytics/branches', authorize('superAdmin', 'admin'), branchList);
 router.get('/analytics/branches/:id', authorize('superAdmin', 'admin'), branchDetail);

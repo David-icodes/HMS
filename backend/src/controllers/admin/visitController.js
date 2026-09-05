@@ -406,8 +406,11 @@ const createHomeVisit = asyncHandler(async (req, res) => {
   const b = req.body;
   if (!b.patientName) throw new ApiError(400, 'Patient name is required');
   const perSession = Math.max(0, Number(b.perSession) || 0);
+  const sessions = Math.max(1, Number(b.sessions) || 1);
+  const total = Math.max(0, billing.round2(perSession * sessions));
   const advance = Math.max(0, Number(b.advance) || 0);
-  const due = Math.max(0, perSession - advance);
+  const due = Math.max(0, billing.round2(total - advance));
+  const pay = billing.computePayment(total, advance, b.paymentMethod);
   const hv = await HomeVisit.create({
     patientName: b.patientName,
     diagnosis: b.diagnosis,
@@ -417,8 +420,12 @@ const createHomeVisit = asyncHandler(async (req, res) => {
     attendance: b.attendance,
     reason: b.reason,
     perSession,
+    sessions,
+    total,
     advance,
     due,
+    paymentMethod: b.paymentMethod || '',
+    paymentStatus: pay.status,
     branch: b.branch || undefined,
     therapist: b.therapist,
     referralDoctor: b.referralDoctor || '',
@@ -431,7 +438,7 @@ const createHomeVisit = asyncHandler(async (req, res) => {
 });
 
 const listHomeVisits = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 20, search, from, to, branch, therapist, sort = '-createdAt' } = req.query;
+  const { page = 1, limit = 20, search, from, to, branch, therapist, referralDoctor, attendance, sort = '-createdAt' } = req.query;
   const query = {};
   if (search) {
     const term = String(search).trim();
@@ -441,6 +448,8 @@ const listHomeVisits = asyncHandler(async (req, res) => {
   if (range.$gte || range.$lte) query.createdAt = range;
   if (branch) query.branch = branch;
   if (therapist) query.therapist = new RegExp(String(therapist), 'i');
+  if (referralDoctor) query.referralDoctor = new RegExp(String(referralDoctor), 'i');
+  if (attendance) query.attendance = new RegExp(String(attendance), 'i');
 
   const total = await HomeVisit.countDocuments(query);
   const sortKey = sort.replace(/^-/, '');
@@ -453,19 +462,46 @@ const listHomeVisits = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, { data: items, total, page: Number(page), limit: Number(limit), totalPages: Math.max(1, Math.ceil(total / Number(limit))) }));
 });
 
+const getHomeVisit = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid home visit id');
+  const hv = await HomeVisit.findById(req.params.id).populate('branch', 'name').populate('createdBy', 'name');
+  if (!hv) throw new ApiError(404, 'Home visit not found');
+  res.status(200).json(new ApiResponse(200, hv));
+});
+
+// ---------- Generate a Home Visit invoice (printable, home-visit specific) ----------
+const generateHomeVisitInvoice = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid home visit id');
+  const hv = await HomeVisit.findById(req.params.id).populate('branch', 'name').populate('createdBy', 'name');
+  if (!hv) throw new ApiError(404, 'Home visit not found');
+
+  if (!hv.invoiceNumber) {
+    const now = new Date();
+    const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const count = await HomeVisit.countDocuments({ invoiceNumber: new RegExp(`^URH-HVINV-${ymd}-`) });
+    hv.invoiceNumber = `URH-HVINV-${ymd}-${String(count + 1).padStart(4, '0')}`;
+    await hv.save();
+  }
+
+  await logActivity({ req, action: 'generate_home_visit_invoice', entity: 'homeVisit', entityId: hv._id, details: { invoiceNumber: hv.invoiceNumber, patient: hv.patientName, total: hv.total } });
+  res.status(201).json(new ApiResponse(201, { homeVisit: hv }, 'Home visit invoice generated'));
+});
+
 const updateHomeVisit = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid home visit id');
   const hv = await HomeVisit.findById(req.params.id);
   if (!hv) throw new ApiError(404, 'Home visit not found');
   const b = req.body;
-  for (const f of ['patientName', 'diagnosis', 'location', 'timing', 'contact', 'attendance', 'reason', 'branch', 'therapist', 'referralDoctor', 'staffInTime', 'staffOutTime']) {
+  for (const f of ['patientName', 'diagnosis', 'location', 'timing', 'contact', 'attendance', 'reason', 'branch', 'therapist', 'referralDoctor', 'staffInTime', 'staffOutTime', 'paymentMethod']) {
     if (b[f] !== undefined) hv[f] = b[f];
   }
-  if (b.perSession !== undefined || b.advance !== undefined) {
-    if (b.perSession !== undefined) hv.perSession = Math.max(0, Number(b.perSession) || 0);
-    if (b.advance !== undefined) hv.advance = Math.max(0, Number(b.advance) || 0);
-    hv.due = Math.max(0, hv.perSession - hv.advance);
-  }
+  if (b.perSession !== undefined) hv.perSession = Math.max(0, Number(b.perSession) || 0);
+  if (b.sessions !== undefined) hv.sessions = Math.max(1, Number(b.sessions) || 1);
+  if (b.advance !== undefined) hv.advance = Math.max(0, Number(b.advance) || 0);
+  hv.total = Math.max(0, billing.round2((Number(hv.perSession) || 0) * (Number(hv.sessions) || 1)));
+  hv.due = Math.max(0, billing.round2(hv.total - (Number(hv.advance) || 0)));
+  const pay = billing.computePayment(hv.total, hv.advance, hv.paymentMethod);
+  hv.paymentStatus = pay.status;
   await hv.save();
   const full = await HomeVisit.findById(hv._id).populate('branch', 'name');
   res.status(200).json(new ApiResponse(200, { homeVisit: full }, 'Home visit updated'));
@@ -645,8 +681,10 @@ module.exports = {
   getPatient,
   createHomeVisit,
   listHomeVisits,
+  getHomeVisit,
   updateHomeVisit,
   deleteHomeVisit,
+  generateHomeVisitInvoice,
   listMasterPatients,
   getMasterPatient,
   updateMasterPatient,

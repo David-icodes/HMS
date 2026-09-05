@@ -24,12 +24,17 @@ const {
   getPatient,
   createHomeVisit,
   listHomeVisits,
-  updateHomeVisit,
-  deleteHomeVisit,
+  getHomeVisit,
+  generateHomeVisitInvoice,
   listPaymentMethods,
   listMasterPatients,
   getMasterPatient,
 } = require('../controllers/admin/visitController');
+const {
+  markIn,
+  markOut,
+  myAttendance,
+} = require('../controllers/admin/attendanceController');
 
 const router = express.Router();
 
@@ -90,8 +95,13 @@ router.post('/visits/:id/invoice', generateVisitInvoice);
 
 router.post('/home-visits', createHomeVisit);
 router.get('/home-visits', listHomeVisits);
-router.put('/home-visits/:id', updateHomeVisit);
-router.delete('/home-visits/:id', deleteHomeVisit);
+router.get('/home-visits/:id', getHomeVisit);
+router.post('/home-visits/:id/invoice', generateHomeVisitInvoice);
+// Staff cannot edit or delete home visits (admin only, enforced here).
+
+router.post('/attendance/in', markIn);
+router.post('/attendance/out', markOut);
+router.get('/attendance/me', myAttendance);
 
 router.post('/patients/:id/invoice', generateInvoice);
 

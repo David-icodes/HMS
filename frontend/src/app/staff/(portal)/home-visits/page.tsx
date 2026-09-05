@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus, Pencil, Trash2, Search, X, ChevronLeft, ChevronRight, Home } from 'lucide-react';
+import Link from 'next/link';
+import { Loader2, Plus, Search, X, ChevronLeft, ChevronRight, Home, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { staffFetch } from '@/lib/staff-auth';
 import { useStaffReference } from '@/hooks/use-staff-reference';
-import { inr } from '@/lib/billing';
+import { computePayment, inr } from '@/lib/billing';
 import type { HomeVisit } from '@/types';
 
 const inputCls =
@@ -16,7 +17,7 @@ interface ListRes {
 }
 
 export default function HomeVisitsPage() {
-  const { branches } = useStaffReference();
+  const { branches, paymentMethods } = useStaffReference();
   const [rows, setRows] = useState<HomeVisit[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -29,12 +30,11 @@ export default function HomeVisitsPage() {
   const [loading, setLoading] = useState(true);
 
   const [open, setOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const emptyForm = {
     patientName: '', diagnosis: '', location: '', timing: '', contact: '', attendance: '',
-    reason: '', perSession: '', advance: '', branch: '', therapist: '', referralDoctor: '',
-    staffInTime: '', staffOutTime: '',
+    reason: '', perSession: '', sessions: '1', advance: '', paymentMethod: '', branch: '', therapist: '',
+    referralDoctor: '',
   };
   const [form, setForm] = useState({ ...emptyForm });
 
@@ -65,35 +65,12 @@ export default function HomeVisitsPage() {
 
   const reset = () => {
     setForm({ ...emptyForm });
-    setEditingId(null);
     setOpen(false);
   };
 
-  const openAdd = () => {
-    reset();
-    setOpen(true);
-  };
-
-  const openEdit = (hv: HomeVisit) => {
-    setForm({
-      patientName: hv.patientName || '',
-      diagnosis: hv.diagnosis || '',
-      location: hv.location || '',
-      timing: hv.timing || '',
-      contact: hv.contact || '',
-      attendance: hv.attendance || '',
-      reason: hv.reason || '',
-      perSession: String(hv.perSession ?? ''),
-      advance: String(hv.advance ?? ''),
-      branch: hv.branch ? hv.branch._id : '',
-      therapist: hv.therapist || '',
-      referralDoctor: hv.referralDoctor || '',
-      staffInTime: hv.staffInTime || '',
-      staffOutTime: hv.staffOutTime || '',
-    });
-    setEditingId(hv._id);
-    setOpen(true);
-  };
+  const totalAuto = (Number(form.perSession) || 0) * (Number(form.sessions) || 1);
+  const dueAuto = Math.max(0, totalAuto - (Number(form.advance) || 0));
+  const payAuto = computePayment(totalAuto, Number(form.advance) || 0);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,37 +89,21 @@ export default function HomeVisitsPage() {
         attendance: form.attendance.trim() || undefined,
         reason: form.reason.trim() || undefined,
         perSession: form.perSession ? Number(form.perSession) : 0,
+        sessions: form.sessions ? Number(form.sessions) : 1,
         advance: form.advance ? Number(form.advance) : 0,
+        paymentMethod: form.paymentMethod || undefined,
         branch: form.branch || undefined,
         therapist: form.therapist.trim() || undefined,
         referralDoctor: form.referralDoctor.trim() || undefined,
-        staffInTime: form.staffInTime.trim() || undefined,
-        staffOutTime: form.staffOutTime.trim() || undefined,
       };
-      if (editingId) {
-        await staffFetch(`/api/staff/home-visits/${editingId}`, { method: 'PUT', body });
-        toast.success('Home visit updated');
-      } else {
-        await staffFetch('/api/staff/home-visits', { method: 'POST', body });
-        toast.success('Home visit added');
-      }
+      await staffFetch('/api/staff/home-visits', { method: 'POST', body });
+      toast.success('Home visit added');
       reset();
       void load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save home visit');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const remove = async (id: string) => {
-    if (!window.confirm('Delete this home visit?')) return;
-    try {
-      await staffFetch(`/api/staff/home-visits/${id}`, { method: 'DELETE' });
-      toast.success('Home visit deleted');
-      void load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete');
     }
   };
 
@@ -155,7 +116,7 @@ export default function HomeVisitsPage() {
           <p className="text-sm text-slate-500">{total} home visit(s)</p>
         </div>
         <button
-          onClick={openAdd}
+          onClick={() => { reset(); setOpen(true); }}
           className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
         >
           <Plus className="h-4 w-4" /> Add Home Visit
@@ -187,7 +148,7 @@ export default function HomeVisitsPage() {
         <form onSubmit={save} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
-              <Home className="h-4 w-4 text-teal-600" /> {editingId ? 'Edit' : 'Add'} Home Visit
+              <Home className="h-4 w-4 text-teal-600" /> Add Home Visit
             </h3>
             <button type="button" onClick={reset} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
               <X className="h-4 w-4" />
@@ -226,12 +187,33 @@ export default function HomeVisitsPage() {
             <Field label="Per Session (₹)">
               <input value={form.perSession} onChange={(e) => setForm({ ...form, perSession: e.target.value })} type="number" min={0} className={inputCls} />
             </Field>
-            <Field label="Advance (₹)">
+            <Field label="No. of Sessions">
+              <input value={form.sessions} onChange={(e) => setForm({ ...form, sessions: e.target.value })} type="number" min={1} className={inputCls} />
+            </Field>
+            <Field label="Total (auto)">
+              <div className="flex h-[38px] items-center rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold">
+                {inr(totalAuto)}
+              </div>
+            </Field>
+            <Field label="Advance / Paid (₹)">
               <input value={form.advance} onChange={(e) => setForm({ ...form, advance: e.target.value })} type="number" min={0} className={inputCls} />
+            </Field>
+            <Field label="Payment Method">
+              <select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} className={inputCls}>
+                <option value="">Select method</option>
+                {paymentMethods.map((m) => (
+                  <option key={m._id} value={m.name}>{m.name}</option>
+                ))}
+              </select>
             </Field>
             <Field label="Due (auto)">
               <div className="flex h-[38px] items-center rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold">
-                {inr(Math.max(0, (Number(form.perSession) || 0) - (Number(form.advance) || 0)))}
+                {inr(dueAuto)}
+              </div>
+            </Field>
+            <Field label="Payment Status">
+              <div className="flex h-[38px] items-center rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm font-semibold">
+                {payAuto.status}
               </div>
             </Field>
             <Field label="Therapist Name">
@@ -240,26 +222,20 @@ export default function HomeVisitsPage() {
             <Field label="Referral Doctor">
               <input value={form.referralDoctor} onChange={(e) => setForm({ ...form, referralDoctor: e.target.value })} className={inputCls} />
             </Field>
-            <Field label="Staff In Time">
-              <input value={form.staffInTime} onChange={(e) => setForm({ ...form, staffInTime: e.target.value })} type="time" className={inputCls} />
-            </Field>
-            <Field label="Staff Out Time">
-              <input value={form.staffOutTime} onChange={(e) => setForm({ ...form, staffOutTime: e.target.value })} type="time" className={inputCls} />
-            </Field>
           </div>
           <button
             type="submit"
             disabled={saving}
             className="mt-5 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingId ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            {saving ? 'Saving…' : editingId ? 'Update' : 'Add'}
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            {saving ? 'Saving…' : 'Add'}
           </button>
         </form>
       )}
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[1100px] text-left text-xs">
+        <table className="w-full min-w-[1200px] text-left text-xs">
           <thead className="bg-slate-50">
             <tr className="text-[10px] uppercase tracking-wider text-slate-500">
               <th className="px-3 py-2.5 font-semibold">S.No</th>
@@ -269,15 +245,15 @@ export default function HomeVisitsPage() {
               <th className="px-3 py-2.5 font-semibold">Timing</th>
               <th className="px-3 py-2.5 font-semibold">Contact</th>
               <th className="px-3 py-2.5 font-semibold">Attendance</th>
-              <th className="px-3 py-2.5 font-semibold">Reason</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Per Session</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Advance</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Due</th>
+              <th className="px-3 py-2.5 font-semibold">Per Session</th>
+              <th className="px-3 py-2.5 font-semibold text-right">Sessions</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Total</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Paid</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Due</th>
+              <th className="px-3 py-2.5 font-semibold">Method</th>
               <th className="px-3 py-2.5 font-semibold">Branch</th>
               <th className="px-3 py-2.5 font-semibold">Therapist</th>
-              <th className="px-3 py-2.5 font-semibold">Referral Doctor</th>
-              <th className="px-3 py-2.5 font-semibold">Staff In</th>
-              <th className="px-3 py-2.5 font-semibold">Staff Out</th>
+              <th className="px-3 py-2.5 font-semibold">Referral</th>
               <th className="px-3 py-2.5 text-right font-semibold">Action</th>
             </tr>
           </thead>
@@ -304,32 +280,22 @@ export default function HomeVisitsPage() {
                   <td className="px-3 py-2.5 text-slate-600">{hv.timing || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.contact || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.attendance || '—'}</td>
-                  <td className="px-3 py-2.5 text-slate-600">{hv.reason || '—'}</td>
                   <td className="px-3 py-2.5 text-right text-slate-600">{inr(hv.perSession)}</td>
+                  <td className="px-3 py-2.5 text-right text-slate-600">{hv.sessions ?? 1}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold text-slate-800">{inr(hv.total ?? (hv.perSession * (hv.sessions ?? 1)))}</td>
                   <td className="px-3 py-2.5 text-right text-slate-600">{inr(hv.advance)}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(hv.due)}</td>
+                  <td className="px-3 py-2.5 text-slate-600">{hv.paymentMethod || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.branch && typeof hv.branch === 'object' ? hv.branch.name : '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.therapist || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{hv.referralDoctor || '—'}</td>
-                  <td className="px-3 py-2.5 text-slate-600">{hv.staffInTime || '—'}</td>
-                  <td className="px-3 py-2.5 text-slate-600">{hv.staffOutTime || '—'}</td>
                   <td className="px-3 py-2.5 text-right">
-                    <div className="inline-flex items-center gap-1">
-                      <button
-                        onClick={() => openEdit(hv)}
-                        className="rounded-md p-1.5 text-slate-500 hover:bg-teal-50 hover:text-teal-600"
-                        aria-label="Edit"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => void remove(hv._id)}
-                        className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                        aria-label="Delete"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => window.open(`/staff/home-visits/${hv._id}/invoice`, '_blank')}
+                      className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-teal-700"
+                    >
+                      <Printer className="h-3 w-3" /> {hv.invoiceNumber ? 'Print Invoice' : 'Invoice'}
+                    </button>
                   </td>
                 </tr>
               ))

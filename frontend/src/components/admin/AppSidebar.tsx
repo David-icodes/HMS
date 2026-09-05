@@ -9,6 +9,7 @@ import {
   CalendarCheck,
   Ticket,
   Receipt,
+  Home,
   Stethoscope,
   Building2,
   Briefcase,
@@ -57,6 +58,7 @@ const NAV_GROUPS: NavGroup[] = [
       { key: 'appointments', label: 'Appointments', href: '/admin/appointments', icon: CalendarCheck, category: 'appointments' },
       { key: 'op-registrations', label: 'OP Registrations', href: '/admin/op-registrations', icon: Ticket, category: 'op' },
       { key: 'invoices', label: 'Invoices', href: '/admin/invoices', icon: Receipt, category: 'op' },
+      { key: 'home-visits', label: 'Home Visits', href: '/admin/home-visits', icon: Home, category: 'op' },
     ],
   },
   {
