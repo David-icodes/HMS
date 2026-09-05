@@ -54,6 +54,8 @@ interface RevenueData {
     totalDue: number;
     transactions: number;
     totalPatients: number;
+    clinicPatients: number;
+    homeVisits: number;
   }[];
   methodRows: {
     methodName: string;
@@ -160,7 +162,7 @@ export default function AdminDashboardPage() {
                           <p className="text-sm font-bold text-emerald-600">{inr(b.totalPaid)}</p>
                         </div>
                         <p className="text-xs text-slate-400">
-                          {b.totalPatients} patient(s) · {b.transactions} visit(s) · billed {inr(b.totalBilled)}
+                          {b.clinicPatients} clinic + {b.homeVisits} home · billed {inr(b.totalBilled)}
                         </p>
                       </div>
                     ))}

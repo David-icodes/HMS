@@ -321,6 +321,50 @@ export interface Visit {
   invoiceNumber?: string;
   createdBy?: { _id: string; name: string } | null;
   signature?: string;
+  courseId?: string;
+  dayNumber?: number;
+  totalDays?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface Course {
+  _id: string;
+  courseNo: string;
+  patient: string | { _id: string; uhid: string; name: string; mobile: string };
+  patientName?: string;
+  treatment?: string;
+  branch?: { _id: string; name: string } | null;
+  department?: { _id: string; name: string } | null;
+  doctor?: { _id: string; name: string; designation?: string } | null;
+  totalDays: number;
+  dayNumber: number;
+  startDate: string;
+  endDate?: string;
+  courseAmount: number;
+  additionalCharges: number;
+  paid: number;
+  due: number;
+  status: 'Active' | 'Completed' | 'Cancelled';
+  notes?: string;
+  createdBy?: { _id: string; name: string } | null;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PaymentTransaction {
+  _id: string;
+  patientId: string;
+  courseId?: string;
+  visitId?: string;
+  homeVisitId?: string;
+  amount: number;
+  paymentMethod?: string;
+  paymentMethodId?: string;
+  paymentDate: string;
+  branchId?: string;
+  note?: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt?: string;
 }

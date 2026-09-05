@@ -139,6 +139,15 @@ const createPatient = asyncHandler(async (req, res) => {
 
 // ---------- Add a new visit to an existing patient ----------
 const createVisitForPatient = async (patient, body, userId) => {
+  const visitType = body.visit?.visitType || 'New OP';
+  // Required fields for every NEW OP record (spec). Follow-ups inherit from their
+  // course/previous visit and only use values provided. Historical records are untouched.
+  if (visitType === 'New OP') {
+    if (!body.visit?.branch) throw new ApiError(400, 'Branch is required.');
+    if (!body.visit?.department) throw new ApiError(400, 'Department is required.');
+    if (!body.visit?.doctor) throw new ApiError(400, 'Doctor is required.');
+    if (!body.signature?.trim()) throw new ApiError(400, 'Doctor / Staff signature is required.');
+  }
   const charges = sanitizeCharges(body.charges || {});
   const { advanced, status } = billing.computePayment(charges.total, body.payment?.advanced, body.payment?.methodName);
   const method = await resolvePaymentMethod(body.payment?.method);
@@ -148,7 +157,7 @@ const createVisitForPatient = async (patient, body, userId) => {
     patient: patient._id,
     uhid: patient.uhid,
     visitDate: body.visit?.visitDate || new Date(),
-    visitType: body.visit?.visitType || 'New OP',
+    visitType,
     branch: body.visit?.branch || undefined,
     department: body.visit?.department || undefined,
     doctor: body.visit?.doctor || undefined,

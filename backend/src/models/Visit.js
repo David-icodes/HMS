@@ -46,6 +46,11 @@ const visitSchema = new mongoose.Schema(
     invoiceNumber: { type: String, trim: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     signature: { type: String, trim: true },
+    // Optional course linkage: follow-up visits belong to a Course and never create
+    // a new billing event on their own (billing is the course + explicit add-ons).
+    courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
+    dayNumber: { type: Number, min: 1 },
+    totalDays: { type: Number, min: 1 },
   },
   { timestamps: true }
 );

@@ -60,6 +60,15 @@ const {
   listAttendance,
   listStaffForAttendance,
 } = require('../controllers/admin/attendanceController');
+const {
+  createCourse,
+  getActiveCourse,
+  getCourse,
+  listCourseVisits,
+  addFollowUp,
+  recordPayment,
+  getCourseBalance,
+} = require('../controllers/admin/courseController');
 const { createUserValidator, updateUserValidator } = require('../validators/authValidator');
 const { idValidator, modelValidator } = require('../validators/siteValidator');
 
@@ -103,6 +112,15 @@ router.get('/attendance/staff-list', authorize('superAdmin', 'admin'), listStaff
 router.get('/analytics/branches', authorize('superAdmin', 'admin'), branchList);
 router.get('/analytics/branches/:id', authorize('superAdmin', 'admin'), branchDetail);
 router.get('/analytics/revenue', authorize('superAdmin', 'admin'), analyticsRevenue);
+
+// Courses (package-based treatment billing: one bill, many visits, many payments)
+router.post('/courses', authorize('superAdmin', 'admin'), createCourse);
+router.get('/courses/active', authorize('superAdmin', 'admin'), getActiveCourse);
+router.get('/courses/:id', authorize('superAdmin', 'admin'), getCourse);
+router.get('/courses/:id/visits', authorize('superAdmin', 'admin'), listCourseVisits);
+router.post('/courses/:id/follow-up', authorize('superAdmin', 'admin'), addFollowUp);
+router.post('/courses/:id/payments', authorize('superAdmin', 'admin'), recordPayment);
+router.get('/courses/:id/balance', authorize('superAdmin', 'admin'), getCourseBalance);
 
 router
   .route('/users')

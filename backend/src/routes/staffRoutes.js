@@ -35,6 +35,15 @@ const {
   markOut,
   myAttendance,
 } = require('../controllers/admin/attendanceController');
+const {
+  createCourse,
+  getActiveCourse,
+  getCourse,
+  listCourseVisits,
+  addFollowUp,
+  recordPayment,
+  getCourseBalance,
+} = require('../controllers/admin/courseController');
 
 const router = express.Router();
 
@@ -102,6 +111,15 @@ router.post('/home-visits/:id/invoice', generateHomeVisitInvoice);
 router.post('/attendance/in', markIn);
 router.post('/attendance/out', markOut);
 router.get('/attendance/me', myAttendance);
+
+// Courses (package treatment billing). Staff may create courses and add follow-ups.
+router.post('/courses', createCourse);
+router.get('/courses/active', getActiveCourse);
+router.get('/courses/:id', getCourse);
+router.get('/courses/:id/visits', listCourseVisits);
+router.post('/courses/:id/follow-up', addFollowUp);
+router.post('/courses/:id/payments', recordPayment);
+router.get('/courses/:id/balance', getCourseBalance);
 
 router.post('/patients/:id/invoice', generateInvoice);
 

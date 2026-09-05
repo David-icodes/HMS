@@ -24,6 +24,8 @@ interface RevenuePayload {
     totalDue: number;
     transactions: number;
     totalPatients: number;
+    clinicPatients: number;
+    homeVisits: number;
   }[];
   methodRows: {
     methodName: string;
@@ -42,6 +44,7 @@ export default function AdminRevenuePage() {
   const [to, setTo] = useState('');
   const [branch, setBranch] = useState('');
   const [method, setMethod] = useState('');
+  const [ch, setCh] = useState('');
   const [branches, setBranches] = useState<Branch[]>([]);
   const [methods, setMethods] = useState<{ _id: string; name: string }[]>([]);
   const [data, setData] = useState<RevenuePayload | null>(null);
@@ -67,6 +70,7 @@ export default function AdminRevenuePage() {
       if (to) params.set('to', to);
       if (branch) params.set('branch', branch);
       if (method) params.set('method', method);
+      if (ch) params.set('ch', ch);
       const q = params.toString();
       const res = await adminFetch<{ data: RevenuePayload }>(`/api/admin/analytics/revenue${q ? `?${q}` : ''}`);
       setData(res.data);
@@ -86,6 +90,7 @@ export default function AdminRevenuePage() {
     setTo('');
     setBranch('');
     setMethod('');
+    setCh('');
   };
 
   const runExport = async (kind: 'branch' | 'method') => {
@@ -95,6 +100,7 @@ export default function AdminRevenuePage() {
       ...(to ? { to } : {}),
       ...(branch ? { branch } : {}),
       ...(method ? { method } : {}),
+      ...(ch ? { ch } : {}),
     };
     const q = new URLSearchParams(qs).toString();
     try {
@@ -109,8 +115,9 @@ export default function AdminRevenuePage() {
         sheet.columns = [
           { header: 'S.No.', key: 'sno', width: 6 },
           { header: 'Branch', key: 'branch', width: 24 },
-          { header: 'Patient Count', key: 'patients', width: 14 },
-          { header: 'OP Count', key: 'op', width: 12 },
+          { header: 'Clinic Patients', key: 'clinic', width: 16 },
+          { header: 'Home Visits', key: 'home', width: 14 },
+          { header: 'Total Patients (Clinic + Home)', key: 'patients', width: 28 },
           { header: 'Total Billing (₹)', key: 'billed', width: 18 },
           { header: 'Paid / Collected (₹)', key: 'paid', width: 20 },
           { header: 'Due (₹)', key: 'due', width: 14 },
@@ -120,15 +127,16 @@ export default function AdminRevenuePage() {
           sheet.addRow({
             sno: i + 1,
             branch: b.branchName,
+            clinic: b.clinicPatients ?? 0,
+            home: b.homeVisits ?? 0,
             patients: b.totalPatients,
-            op: b.transactions,
             billed: b.totalBilled,
             paid: b.totalPaid,
             due: b.totalDue,
           });
         });
         if ((payload.branchRows ?? []).length === 0) {
-          sheet.addRow({ sno: 1, branch: 'No data', patients: 0, op: 0, billed: 0, paid: 0, due: 0 });
+          sheet.addRow({ sno: 1, branch: 'No data', clinic: 0, home: 0, patients: 0, billed: 0, paid: 0, due: 0 });
         }
       } else {
         const sheet = workbook.addWorksheet('Payment Method Revenue');
@@ -181,7 +189,7 @@ export default function AdminRevenuePage() {
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-end">
-        <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
           <div>
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400">From</label>
             <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
@@ -206,6 +214,14 @@ export default function AdminRevenuePage() {
               {methods.map((m) => (
                 <option key={m._id} value={m.name}>{m.name}</option>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-slate-400">Clinic / Home</label>
+            <select value={ch} onChange={(e) => setCh(e.target.value)} className={inputCls}>
+              <option value="">All (Clinic + Home)</option>
+              <option value="clinic">Clinic (C)</option>
+              <option value="home">Home (H)</option>
             </select>
           </div>
         </div>
@@ -237,15 +253,16 @@ export default function AdminRevenuePage() {
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-4">
             <h3 className="text-sm font-bold text-slate-900">Branch-wise Revenue</h3>
-            <p className="text-xs text-slate-400">Aggregated from actual OP visit charges &amp; payments</p>
+            <p className="text-xs text-slate-400">Billing from actual bills (course billed once) &amp; revenue from actual payments — each counted once</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
                 <tr>
                   <th className="px-5 py-3 font-semibold">Branch</th>
-                  <th className="px-3 py-3 text-right font-semibold">Patients</th>
-                  <th className="px-3 py-3 text-right font-semibold">Visits</th>
+                  <th className="px-3 py-3 text-right font-semibold">Clinic</th>
+                  <th className="px-3 py-3 text-right font-semibold">Home Visits</th>
+                  <th className="px-3 py-3 text-right font-semibold">Total Patients</th>
                   <th className="px-3 py-3 text-right font-semibold">Billed</th>
                   <th className="px-3 py-3 text-right font-semibold">Paid</th>
                   <th className="px-5 py-3 text-right font-semibold">Due</th>
@@ -253,15 +270,16 @@ export default function AdminRevenuePage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400"><Loader2 className="mx-auto h-6 w-6 animate-spin text-sky-600" /></td></tr>
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400"><Loader2 className="mx-auto h-6 w-6 animate-spin text-sky-600" /></td></tr>
                 ) : (data?.branchRows ?? []).length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">No revenue data for the selected filters.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">No revenue data for the selected filters.</td></tr>
                 ) : (
                   (data?.branchRows ?? []).map((b) => (
                     <tr key={b.branchId} className="hover:bg-slate-50">
                       <td className="px-5 py-3 font-medium text-slate-800">{b.branchName}</td>
-                      <td className="px-3 py-3 text-right text-slate-600">{b.totalPatients}</td>
-                      <td className="px-3 py-3 text-right text-slate-600">{b.transactions}</td>
+                      <td className="px-3 py-3 text-right text-slate-600">{b.clinicPatients ?? 0}</td>
+                      <td className="px-3 py-3 text-right text-slate-600">{b.homeVisits ?? 0}</td>
+                      <td className="px-3 py-3 text-right font-medium text-slate-800">{b.totalPatients}</td>
                       <td className="px-3 py-3 text-right font-semibold text-slate-800">{inr(b.totalBilled)}</td>
                       <td className="px-3 py-3 text-right font-semibold text-emerald-600">{inr(b.totalPaid)}</td>
                       <td className="px-5 py-3 text-right font-semibold text-amber-600">{inr(b.totalDue)}</td>
