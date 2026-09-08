@@ -47,6 +47,7 @@ const {
   recordPayment,
   getCourseBalance,
   listPatientCourses,
+  listActiveCourses,
 } = require('../controllers/admin/courseController');
 
 const router = express.Router();
@@ -120,6 +121,7 @@ router.get('/attendance/me', myAttendance);
 // Courses (package treatment billing). Staff may create courses and add follow-ups.
 router.post('/courses', createCourse);
 router.get('/courses/active', getActiveCourse);
+router.get('/courses/active-list', listActiveCourses);
 router.get('/courses/patient/:patientId', listPatientCourses);
 router.get('/courses/:id', getCourse);
 router.get('/courses/:id/visits', listCourseVisits);

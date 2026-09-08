@@ -92,7 +92,7 @@ export default function PatientCoursesPage() {
           href="/staff/follow-up"
           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
         >
-          Back to search
+          Back to Follow-up
         </Link>
       </div>
 

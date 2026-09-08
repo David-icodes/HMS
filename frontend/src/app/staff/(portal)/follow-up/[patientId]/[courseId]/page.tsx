@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Loader2, ChevronLeft, Plus, Banknote, X, Phone, Hash, UserRound } from 'lucide-react';
+import { Loader2, ChevronLeft, Plus, Banknote, X, Phone, Hash, UserRound, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { staffFetch } from '@/lib/staff-auth';
 import { useStaffReference } from '@/hooks/use-staff-reference';
@@ -53,6 +53,21 @@ interface CourseDetailRes {
 
 const inputCls =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20';
+
+const formatDayDate = (dateStr: string | Date | undefined | null): string => {
+  const d = new Date(dateStr as string);
+  if (!dateStr || Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const toInputDate = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const scheduledDate = (startDate: string, day: number): Date => {
+  const d = new Date(startDate);
+  d.setDate(d.getDate() + (day - 1));
+  return d;
+};
 
 export default function CourseDetailPage() {
   const params = useParams<{ patientId: string; courseId: string }>();
@@ -218,7 +233,7 @@ export default function CourseDetailPage() {
         <div className="flex items-center gap-2">
           {course.status === 'Active' && completedDays < totalDays && (
             <button
-              onClick={() => { setPayMode(false); setFollow({ ...emptyFollow, visitDate: new Date().toISOString().slice(0, 10) }); setFollowMode(true); }}
+              onClick={() => { setPayMode(false); setFollow({ ...emptyFollow, visitDate: toInputDate(scheduledDate(course.startDate, completedDays + 1)) }); setFollowMode(true); }}
               className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
             >
               <Plus className="h-4 w-4" /> Add Day {completedDays + 1}
@@ -388,17 +403,19 @@ export default function CourseDetailPage() {
       )}
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[900px] text-left text-xs">
+        <table className="w-full min-w-[1100px] text-left text-xs">
           <thead className="bg-slate-50">
             <tr className="text-[10px] uppercase tracking-wider text-slate-500">
               <th className="px-3 py-2.5 font-semibold">Day</th>
               <th className="px-3 py-2.5 font-semibold">Date</th>
               <th className="px-3 py-2.5 font-semibold">Treatment</th>
-              <th className="px-3 py-2.5 font-semibold">Charges</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Amount</th>
               <th className="px-3 py-2.5 text-right font-semibold">Paid</th>
               <th className="px-3 py-2.5 font-semibold">Method</th>
               <th className="px-3 py-2.5 text-right font-semibold">Due</th>
               <th className="px-3 py-2.5 font-semibold">Status</th>
+              <th className="px-3 py-2.5 font-semibold">Notes</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Invoice</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -408,7 +425,10 @@ export default function CourseDetailPage() {
                 return (
                   <tr key={day} className="bg-slate-50/60">
                     <td className="px-3 py-2.5 font-bold text-slate-800">Day {day}</td>
-                    <td className="px-3 py-2.5 text-slate-400">Pending</td>
+                    <td className="px-3 py-2.5 text-slate-500">
+                      {formatDayDate(scheduledDate(course.startDate, day).toISOString())}
+                      <span className="ml-1 italic text-slate-300">(scheduled)</span>
+                    </td>
                     <td className="px-3 py-2.5 text-slate-400">—</td>
                     <td className="px-3 py-2.5 text-right text-slate-400">₹0</td>
                     <td className="px-3 py-2.5 text-right text-slate-400">₹0</td>
@@ -419,6 +439,8 @@ export default function CourseDetailPage() {
                         Pending
                       </span>
                     </td>
+                    <td className="px-3 py-2.5 text-slate-400">—</td>
+                    <td className="px-3 py-2.5 text-right text-slate-300">—</td>
                   </tr>
                 );
               }
@@ -430,7 +452,7 @@ export default function CourseDetailPage() {
                 <tr key={v._id} className="hover:bg-slate-50">
                   <td className="px-3 py-2.5 font-bold text-slate-800">Day {day}</td>
                   <td className="px-3 py-2.5 text-slate-600">
-                    {v.visitDate ? new Date(v.visitDate).toLocaleDateString('en-IN') : '—'}
+                    {v.visitDate ? formatDayDate(v.visitDate) : '—'}
                   </td>
                   <td className="px-3 py-2.5 text-slate-600">{v.treatment || v.diagnosis || '—'}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-slate-700">{inr(charges)}</td>
@@ -445,6 +467,15 @@ export default function CourseDetailPage() {
                     >
                       {status}
                     </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-600">{v.notes || '—'}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    <Link
+                      href={`/staff/visits/${v._id}/invoice`}
+                      className="inline-flex items-center gap-1 rounded-md bg-teal-50 px-2 py-1 text-[10px] font-semibold text-teal-700 hover:bg-teal-100"
+                    >
+                      <Printer className="h-3 w-3" /> Invoice
+                    </Link>
                   </td>
                 </tr>
               );

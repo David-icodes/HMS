@@ -116,7 +116,7 @@ export default function StaffPatientView() {
                   <td className="px-4 py-3 text-right font-semibold text-amber-600">{inr(v.payment?.due)}</td>
                   <td className="px-4 py-3 text-right">
                     <Link
-                      href={`/staff/patients/${patient._id}/invoice`}
+                      href={`/staff/visits/${v._id}/invoice`}
                       className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-teal-700"
                     >
                       <Printer className="h-3 w-3" /> Invoice
@@ -129,12 +129,14 @@ export default function StaffPatientView() {
         )}
       </div>
 
-      <Link
-        href={`/staff/patients/${patient._id}/invoice`}
-        className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
-      >
-        <Receipt className="h-4 w-4" /> Generate Invoice
-      </Link>
+      {visits.length > 0 && (
+        <Link
+          href={`/staff/visits/${visits[0]._id}/invoice`}
+          className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
+        >
+          <Receipt className="h-4 w-4" /> Generate Invoice (latest visit)
+        </Link>
+      )}
     </div>
   );
 }

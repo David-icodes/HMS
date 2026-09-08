@@ -515,6 +515,102 @@ const listPatientCourses = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, { patient, courses: rows }));
 });
 
+// ---------- All active courses across patients (staff follow-up list) ----------
+// One row per active course with patient info, ledger and progress.
+const listActiveCourses = asyncHandler(async (req, res) => {
+  const courses = await Course.find({ status: 'Active' })
+    .sort({ startDate: 1, createdAt: 1 })
+    .populate('patient', 'uhid name mobile cH age gender address')
+    .populate('branch', 'name')
+    .populate('department', 'name')
+    .populate('doctor', 'name')
+    .lean();
+
+  if (!courses.length) {
+    return res.status(200).json(new ApiResponse(200, []));
+  }
+
+  const courseIds = courses.map((c) => c._id);
+  const [visitAgg, payAgg] = await Promise.all([
+    Visit.aggregate([
+      { $match: { courseId: { $in: courseIds } } },
+      {
+        $group: {
+          _id: '$courseId',
+          completedDays: { $sum: 1 },
+          lastVisitDate: { $max: '$visitDate' },
+        },
+      },
+    ]),
+    PaymentTransaction.aggregate([
+      { $match: { courseId: { $in: courseIds } } },
+      { $group: { _id: '$courseId', paid: { $sum: '$amount' } } },
+    ]),
+  ]);
+  const visitMap = {};
+  visitAgg.forEach((r) => (visitMap[r._id.toString()] = r));
+  const payMap = {};
+  payAgg.forEach((r) => (payMap[r._id.toString()] = r));
+
+  const rows = courses.map((c) => {
+    const id = c._id.toString();
+    const completedDays = visitMap[id]?.completedDays || 0;
+    const paid = round2((payMap[id]?.paid || 0) + (c.initialAdvance || 0));
+    const billed = courseBilled(c);
+    const due = Math.max(0, round2(billed - paid));
+    const balance = Math.max(0, round2(paid - billed));
+    const totalDays = Math.max(1, c.totalDays || 1);
+    const nextDay = Math.min(completedDays + 1, totalDays);
+    const scheduled = new Date(c.startDate);
+    scheduled.setDate(scheduled.getDate() + completedDays);
+    return {
+      course: {
+        _id: c._id,
+        courseNo: c.courseNo,
+        treatment: c.treatment,
+        status: c.status,
+        totalDays,
+        dayNumber: c.dayNumber || nextDay,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        courseAmount: c.courseAmount,
+        additionalCharges: c.additionalCharges || 0,
+        initialAdvance: round2(c.initialAdvance || 0),
+      },
+      patient: c.patient
+        ? {
+            _id: c.patient._id,
+            uhid: c.patient.uhid,
+            name: c.patient.name,
+            mobile: c.patient.mobile,
+            cH: c.patient.cH,
+          }
+        : null,
+      branch: c.branch?.name || null,
+      department: c.department?.name || null,
+      doctor: c.doctor?.name || null,
+      billed,
+      paid,
+      due,
+      balance,
+      completedDays,
+      nextDay,
+      nextDayDate: scheduled,
+      lastVisitDate: visitMap[id]?.lastVisitDate || null,
+      progress: `${completedDays}/${totalDays}`,
+    };
+  });
+
+  rows.sort((a, b) => {
+    const pa = a.completedDays / a.course.totalDays;
+    const pb = b.completedDays / b.course.totalDays;
+    if (pa !== pb) return pa - pb;
+    return new Date(a.course.startDate) - new Date(b.course.startDate);
+  });
+
+  res.status(200).json(new ApiResponse(200, rows));
+});
+
 module.exports = {
   createCourse,
   getActiveCourse,
@@ -524,4 +620,5 @@ module.exports = {
   recordPayment,
   getCourseBalance,
   listPatientCourses,
+  listActiveCourses,
 };

@@ -93,8 +93,8 @@ export default function VisitInvoicePage() {
   return (
     <div className="space-y-5">
       <div className="print:hidden">
-        <Link href="/staff/op-list" className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-teal-700">
-          <ArrowLeft className="h-4 w-4" /> Back to OP list
+        <Link href="/staff/patients" className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-teal-700">
+          <ArrowLeft className="h-4 w-4" /> Back to patients
         </Link>
       </div>
 
