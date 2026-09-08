@@ -214,6 +214,7 @@ function VisitInvoiceSheet({ visit, invoice }: { visit: Visit; invoice: Invoice 
           <Row label="Mobile" value={pat?.mobile || '—'} />
           <Row label="Age" value={pat?.age != null ? String(pat.age) : '—'} />
           <Row label="Gender" value={pat?.gender || '—'} />
+          <Row label="C/H" value={pat?.cH ? String(pat.cH).toUpperCase() : '—'} />
         </div>
         <div>
           <Row label="Doctor" value={visit.doctor?.name || '—'} />
@@ -251,11 +252,13 @@ function VisitInvoiceSheet({ visit, invoice }: { visit: Visit; invoice: Invoice 
       </table>
 
       <div className="mt-4 flex justify-end">
-        <div className="w-64 space-y-1.5 text-sm">
+        <div className="w-72 space-y-1.5 text-sm">
           <Row label="TOTAL" value={inr(c.total)} bold />
+          <Row label="Previous Advance" value={inr(pay.previousAdvance || 0)} />
           <Row label="Paid / Advance" value={inr(pay.advanced)} />
           <Row label="Payment Method" value={pay.methodName || '—'} />
-          <Row label="Due" value={inr(pay.due)} />
+          <Row label="Due" value={inr(Math.max(0, pay.due || 0))} />
+          <Row label="Balance / Excess" value={inr(Math.max(0, (pay.advanced || 0) - (c.total || 0)))} />
           <Row label="Payment Status" value={pay.status} />
         </div>
       </div>

@@ -196,7 +196,13 @@ export default function CourseDetailPage() {
     return <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">{error}</div>;
   }
 
-  if (!payload) return null;
+  if (!payload) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+        Course details could not be loaded for this patient. Please check that the record exists and try again.
+      </div>
+    );
+  }
 
   const course = (payload.course || payload) as CourseDetailCourse;
   const patient = payload.patient;
@@ -219,8 +225,6 @@ export default function CourseDetailPage() {
   });
   const dayRows = Array.from({ length: totalDays }, (_, i) => i + 1);
 
-  const latestPayment = payments[payments.length - 1];
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -231,6 +235,14 @@ export default function CourseDetailPage() {
           <ChevronLeft className="h-3.5 w-3.5" /> {patient?.name || 'Back'}
         </Link>
         <div className="flex items-center gap-2">
+          {visitsByDay[1] && (
+            <Link
+              href={`/staff/visits/${visitsByDay[1]._id}/invoice`}
+              className="inline-flex items-center gap-2 rounded-lg border border-teal-600 px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50"
+            >
+              <Printer className="h-4 w-4" /> Invoice
+            </Link>
+          )}
           {course.status === 'Active' && completedDays < totalDays && (
             <button
               onClick={() => { setPayMode(false); setFollow({ ...emptyFollow, visitDate: toInputDate(scheduledDate(course.startDate, completedDays + 1)) }); setFollowMode(true); }}
@@ -292,22 +304,43 @@ export default function CourseDetailPage() {
           {course.doctor ? `• Dr. ${course.doctor.name}` : ''} {course.branch ? `• ${course.branch.name}` : ''}
         </p>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-          <Stat label="Progress" value={`Day ${currentDay} of ${totalDays}`} />
-          <Stat label="Billed" value={inr(billed)} />
-          <Stat label="Paid" value={inr(paid)} accent="text-teal-700" />
-          <Stat label="Due" value={inr(due)} accent="text-amber-600" />
-          <Stat label="Balance" value={inr(balance)} accent={balance > 0 ? 'text-emerald-700' : ''} />
-          <Stat label="Initial Advance" value={inr(initialAdvance)} />
-          <Stat label="Start Date" value={new Date(course.startDate).toLocaleDateString('en-IN')} />
-          <Stat
-            label="Latest Payment"
-            value={
-              latestPayment
-                ? `${inr(latestPayment.amount)}${latestPayment.paymentMethod ? ` • ${latestPayment.paymentMethod}` : ''}${latestPayment.paymentDate ? ` • ${new Date(latestPayment.paymentDate).toLocaleDateString('en-IN')}` : ''}`
-                : '—'
-            }
-          />
+        <div className="mt-4 space-y-4">
+          <div>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient Details</p>
+            <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4 lg:grid-cols-5">
+              <Stat label="Patient Name" value={patient?.name || '—'} />
+              <Stat label="UHID" value={patient?.uhid || '—'} />
+              <Stat label="C/H" value={(patient?.cH || 'Clinic')} />
+              <Stat label="Mobile" value={patient?.mobile || '—'} />
+              <Stat label="Age" value={patient?.age != null ? String(patient.age) : '—'} />
+              <Stat label="Gender" value={patient?.gender || '—'} />
+              <Stat label="Doctor" value={course.doctor?.name ? `Dr. ${course.doctor.name}` : '—'} />
+              <Stat label="Department" value={course.department?.name || '—'} />
+              <Stat label="Course Status" value={course.status} />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Course Details</p>
+            <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+              <Stat label="Total Course Days" value={String(totalDays)} />
+              <Stat label="Completed Days" value={String(completedDays)} />
+              <Stat label="Remaining Days" value={String(Math.max(0, totalDays - completedDays))} />
+              <Stat label="Progress" value={`Day ${currentDay} of ${totalDays}`} />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Financial Analytics</p>
+            <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4 lg:grid-cols-6">
+              <Stat label="Total Course Amount" value={inr(billed)} />
+              <Stat label="Amount Paid" value={inr(paid)} accent="text-teal-700" />
+              <Stat label="Due" value={inr(due)} accent={due > 0 ? 'text-amber-600' : ''} />
+              <Stat label="Balance / Excess" value={inr(balance)} accent={balance > 0 ? 'text-emerald-700' : ''} />
+              <Stat label="Initial Advance" value={inr(initialAdvance)} />
+              <Stat label="Start Date" value={new Date(course.startDate).toLocaleDateString('en-IN')} />
+            </div>
+          </div>
         </div>
 
         {balance > 0 && (

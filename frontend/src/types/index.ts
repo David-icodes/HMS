@@ -307,6 +307,7 @@ export interface VisitCharges {
 
 export interface VisitPayment {
   advanced: number;
+  previousAdvance?: number;
   method?: string | { _id: string; name: string } | null;
   methodName?: string;
   due: number;
