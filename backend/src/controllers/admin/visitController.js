@@ -631,12 +631,14 @@ const buildPatientRows = async (patients) => {
   return patients.map((p) => {
     const id = p._id.toString();
     const last = lastByPatient[id] || null;
+    const billingVisit = visits.find((v) => v.patient.toString() === id && v.charges && v.charges.total > 0) || null;
     const money = moneyMap[id] || { billed: 0, paid: 0 };
     const billed = Math.max(0, money.billed);
     const paid = Math.max(0, money.paid);
     return {
       ...p.toObject(),
       lastVisit: last,
+      billingVisit,
       visitCount: visitCountByPatient[id] || 0,
       outstanding: dueMap[id] || 0,
       billed,

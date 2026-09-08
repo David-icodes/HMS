@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import Link from 'next/link';
+import { Loader2, Search, ChevronLeft, ChevronRight, Receipt } from 'lucide-react';
 import { staffFetch } from '@/lib/staff-auth';
-import type { Patient } from '@/types';
+import type { Patient, Visit } from '@/types';
 
 interface PatientRow extends Patient {
   visitCount?: number;
@@ -13,6 +14,7 @@ interface PatientRow extends Patient {
   paid?: number;
   due?: number;
   balance?: number;
+  billingVisit?: Visit | null;
   activeCourse?: { courseNo?: string; totalDays?: number; dayNumber?: number } | null;
 }
 
@@ -104,23 +106,24 @@ export default function StaffPatients() {
               <th className="px-3 py-2.5 text-right font-semibold">Due</th>
               <th className="px-3 py-2.5 text-right font-semibold">Balance</th>
               <th className="px-3 py-2.5 font-semibold">Last Visit</th>
+              <th className="px-3 py-2.5 font-semibold">Invoice</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={12} className="px-4 py-12 text-center text-slate-400">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
                   <p className="mt-2">Loading patients...</p>
                 </td>
               </tr>
             ) : error ? (
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-red-500">{error}</td>
+                <td colSpan={12} className="px-4 py-12 text-center text-red-500">{error}</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={12} className="px-4 py-12 text-center text-slate-400">
                   No patients found.
                 </td>
               </tr>
@@ -146,6 +149,18 @@ export default function StaffPatients() {
                   <td className="px-3 py-2.5 text-right font-semibold text-teal-600">{inr(p.balance)}</td>
                   <td className="px-3 py-2.5 text-slate-600">
                     {p.lastVisit ? formatDate(p.lastVisit.visitDate) : '—'}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {p.billingVisit ? (
+                      <Link
+                        href={`/staff/visits/${p.billingVisit._id}/invoice`}
+                        className="inline-flex items-center gap-1 rounded-md border border-teal-600 px-2.5 py-1 text-[10px] font-semibold text-teal-700 hover:bg-teal-50"
+                      >
+                        <Receipt className="h-3 w-3" /> Invoice
+                      </Link>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
                   </td>
                 </tr>
               ))

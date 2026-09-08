@@ -114,24 +114,23 @@ export default function FollowUpPage() {
             )}
           </div>
         ) : (
-          <table className="w-full min-w-[1200px] text-left text-xs">
+          <table className="w-full min-w-[1040px] text-left text-xs">
             <thead className="bg-slate-50">
               <tr className="text-[10px] uppercase tracking-wider text-slate-500">
-                <th className="px-3 py-2.5 font-semibold">S.No</th>
-                <th className="px-3 py-2.5 font-semibold">Patient</th>
-                <th className="px-3 py-2.5 font-semibold">UHID</th>
-                <th className="px-3 py-2.5 font-semibold">C/H</th>
-                <th className="px-3 py-2.5 font-semibold">Course</th>
-                <th className="px-3 py-2.5 font-semibold">Course Days</th>
-                <th className="px-3 py-2.5 font-semibold">Progress</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Total</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Paid</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Due</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Balance</th>
-                <th className="px-3 py-2.5 font-semibold">Last Course Date</th>
-                <th className="px-3 py-2.5 font-semibold">Next / Current Day</th>
-                <th className="px-3 py-2.5 font-semibold">Status</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Action</th>
+                <th className="px-2.5 py-2.5 font-semibold">S.No</th>
+                <th className="px-2.5 py-2.5 font-semibold">Patient</th>
+                <th className="px-2.5 py-2.5 font-semibold">C/H</th>
+                <th className="px-2.5 py-2.5 font-semibold">Course</th>
+                <th className="px-2.5 py-2.5 font-semibold">Course Days</th>
+                <th className="px-2.5 py-2.5 font-semibold">Progress</th>
+                <th className="px-2.5 py-2.5 text-right font-semibold">Total</th>
+                <th className="px-2.5 py-2.5 text-right font-semibold">Paid</th>
+                <th className="px-2.5 py-2.5 text-right font-semibold">Due</th>
+                <th className="px-2.5 py-2.5 text-right font-semibold">Balance</th>
+                <th className="px-2.5 py-2.5 font-semibold">Last Course Date</th>
+                <th className="px-2.5 py-2.5 font-semibold">Next / Current Day</th>
+                <th className="px-2.5 py-2.5 font-semibold">Status</th>
+                <th className="px-2.5 py-2.5 font-semibold">Open</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -139,8 +138,8 @@ export default function FollowUpPage() {
                 const overdue = r.nextDayDate && new Date(r.nextDayDate) < new Date(new Date().toDateString());
                 return (
                   <tr key={`${r.course._id}-${r.patient?._id}`} className="cursor-pointer hover:bg-slate-50">
-                    <td className="px-3 py-2.5 text-slate-500">{i + 1}</td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2.5 py-2.5 text-slate-500">{i + 1}</td>
+                    <td className="px-2.5 py-2.5">
                       <Link
                         href={r.patient ? `/staff/follow-up/${r.patient._id}/${r.course._id}` : '#'}
                         className="font-medium text-slate-800 hover:text-teal-700"
@@ -148,30 +147,29 @@ export default function FollowUpPage() {
                         {r.patient?.name || '—'}
                       </Link>
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{r.patient?.uhid || '—'}</td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2.5 py-2.5">
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-slate-500">
                         {r.patient?.cH || 'C'}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2.5 py-2.5">
                       <span className="inline-flex items-center gap-1 rounded-md bg-teal-50 px-2 py-1 text-[10px] font-semibold text-teal-700">
                         <Activity className="h-3 w-3" /> {r.course.courseNo}
                       </span>
                       {r.course.treatment && <span className="ml-1.5 text-slate-600">{r.course.treatment}</span>}
                     </td>
-                    <td className="px-3 py-2.5 text-slate-600">
+                    <td className="px-2.5 py-2.5 text-slate-600">
                       {r.completedDays}/{r.course.totalDays}
                     </td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.progress} days</td>
-                    <td className="px-3 py-2.5 text-right font-semibold text-slate-700">{inr(r.billed)}</td>
-                    <td className="px-3 py-2.5 text-right font-semibold text-teal-700">{inr(r.paid)}</td>
-                    <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(r.due)}</td>
-                    <td className="px-3 py-2.5 text-right font-semibold text-emerald-700">{inr(r.balance)}</td>
-                    <td className="px-3 py-2.5 text-slate-600">
+                    <td className="px-2.5 py-2.5 text-slate-600">{r.progress} days</td>
+                    <td className="px-2.5 py-2.5 text-right font-semibold text-slate-700">{inr(r.billed)}</td>
+                    <td className="px-2.5 py-2.5 text-right font-semibold text-teal-700">{inr(r.paid)}</td>
+                    <td className="px-2.5 py-2.5 text-right font-semibold text-amber-600">{inr(r.due)}</td>
+                    <td className="px-2.5 py-2.5 text-right font-semibold text-emerald-700">{inr(r.balance)}</td>
+                    <td className="px-2.5 py-2.5 text-slate-600">
                       {r.lastVisitDate ? formatDate(r.lastVisitDate) : '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-slate-600">
+                    <td className="px-2.5 py-2.5 text-slate-600">
                       {r.completedDays < r.course.totalDays ? (
                         <span className={overdue ? 'text-amber-600' : ''}>
                           Day {r.nextDay}
@@ -181,15 +179,15 @@ export default function FollowUpPage() {
                         'Completed'
                       )}
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2.5 py-2.5">
                       <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-700">
                         {r.course.status}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-2.5 py-2.5">
                       <Link
                         href={r.patient ? `/staff/follow-up/${r.patient._id}/${r.course._id}` : '#'}
-                        className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-teal-700"
+                        className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-3 py-1.5 text-[10px] font-semibold text-white hover:bg-teal-700"
                       >
                         Open <ChevronRight className="h-3 w-3" />
                       </Link>
