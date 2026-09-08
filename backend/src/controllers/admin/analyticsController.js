@@ -463,4 +463,199 @@ const revenueReport = asyncHandler(async (req, res) => {
   );
 });
 
-module.exports = { branchList, branchDetail, revenueReport };
+// ---------- Day-wise revenue analytics (dashboard) ----------
+// Each row = one calendar day with:
+//   date       - day (YYYY-MM-DD)
+//   billed     - money billed that day (course billed once day-1, follow-ups ₹0, +
+//                 explicit additional charges billed that day, + home visits billed that day)
+//   received   - actual money received that day (PaymentTransaction by paymentDate +
+//                 legacy OP advanced not covered by a transaction + home visit advance)
+//   transactions - count of actual financial payments that day
+//   patients   - distinct patients billed that day (clinic patients + home patients)
+//   due        - CUMULATIVE (running billed - running received up to & incl. that day)
+// Billing date is the bill (visitDate / createdAt) date; payment date is the actual
+// payment (paymentDate) date. A follow-up day never re-bills, so it never inflates Due.
+const dayWiseRevenue = asyncHandler(async (req, res) => {
+  const q = req.query;
+  const branchFilter = (field) => {
+    const f = {};
+    if (q.branch && mongoose.isValidObjectId(q.branch)) f[field] = new mongoose.Types.ObjectId(q.branch);
+    return f;
+  };
+
+  const txRange = parseRange(q.date || q.from, q.date || q.to);
+  const visitRange = parseRange(q.date || q.from, q.date || q.to);
+  const homeRange = parseRange(q.date || q.from, q.date || q.to);
+
+  // What dates should we enumerate? If a single date (date or from==to) -> 1 day.
+  // Else enumerate every day between from..to.
+  const dayList = [];
+  const daySet = new Map();
+  const addDay = (iso) => {
+    if (!daySet.has(iso)) {
+      daySet.set(iso, { date: iso, billed: 0, received: 0, transactions: 0, patients: new Set(), billedClinic: 0, billedHome: 0 });
+    }
+  };
+
+  const startStr = q.date || q.from;
+  const endStr = q.date || q.to;
+  const wide = startStr && endStr && startStr !== endStr;
+
+  if (startStr) addDay(String(startStr).slice(0, 10));
+
+  // ---- Billing from OP visits (visitDate) ----
+  const visitFilter = { ...visitRangeGrand(visitRange), ...branchFilter('branch') };
+  const visitBilled = await Visit.aggregate([
+    { $match: visitFilter },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$visitDate' } },
+        billed: { $sum: '$charges.total' },
+        patients: { $addToSet: '$patient' },
+      },
+    },
+  ]);
+  const visitBilledMap = {};
+  visitBilled.forEach((r) => { visitBilledMap[r._id] = r; });
+
+  // ---- Payments from actual transactions (paymentDate) ----
+  const txFilter2 = {
+    ...(txRange.$gte || txRange.$lte ? { paymentDate: txRange } : {}),
+    ...branchFilter('branchId'),
+  };
+  const txAgg = await PaymentTransaction.aggregate([
+    { $match: txFilter2 },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$paymentDate' } },
+        received: { $sum: '$amount' },
+        transactions: { $sum: 1 },
+      },
+    },
+  ]);
+  const txMap = {};
+  txAgg.forEach((r) => { txMap[r._id] = r; });
+
+  // ---- Legacy OP payments not covered by a transaction (visitDate) ----
+  const coveredTxIds = await PaymentTransaction.distinct('visitId');
+  const coveredCourseIds = await PaymentTransaction.distinct('courseId');
+  const legacyMatch = {
+    ...visitRangeGrand(visitRange),
+    ...branchFilter('branch'),
+    'payment.advanced': { $gt: 0 },
+    $or: [{ courseId: null }, { courseId: { $nin: coveredCourseIds } }],
+    _id: { $nin: coveredTxIds },
+  };
+  const legacyAgg = await Visit.aggregate([
+    { $match: legacyMatch },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$visitDate' } },
+        received: { $sum: '$payment.advanced' },
+        transactions: { $sum: 1 },
+      },
+    },
+  ]);
+  const legacyMap = {};
+  legacyAgg.forEach((r) => { legacyMap[r._id] = r; });
+
+  // ---- Home visits: billed + advance (createdAt) ----
+  const homeFilter2 = { ...(homeRange.$gte || homeRange.$lte ? { createdAt: homeRange } : {}), ...branchFilter('branch') };
+  const homeAgg = await HomeVisit.aggregate([
+    { $match: homeFilter2 },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        billed: { $sum: { $ifNull: ['$total', { $multiply: [{ $ifNull: ['$perSession', 0] }, { $ifNull: ['$sessions', 1] }] }] } },
+        advance: { $sum: { $ifNull: ['$advance', 0] } },
+        transactions: { $sum: 1 },
+        homePatients: { $addToSet: '$patientName' },
+      },
+    },
+  ]);
+  const homeMap = {};
+  homeAgg.forEach((r) => { homeMap[r._id] = r; });
+
+  // ---- Enumerate range ----
+  if (wide) {
+    const s = new Date(`${startStr}T00:00:00`);
+    const e = new Date(`${endStr}T00:00:00`);
+    if (!Number.isNaN(s.getTime()) && !Number.isNaN(e.getTime())) {
+      const cur = new Date(s);
+      while (cur <= e) {
+        addDay(cur.toISOString().slice(0, 10));
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+  }
+
+  // Merge per-day
+  const allDates = new Set([...Object.keys(visitBilledMap), ...Object.keys(txMap), ...Object.keys(legacyMap), ...Object.keys(homeMap), ...daySet.keys()]);
+  allDates.forEach((d) => addDay(d));
+
+  let cumBilled = 0;
+  let cumReceived = 0;
+  const rows = [];
+  [...daySet.keys()].sort().forEach((d) => {
+    const r = daySet.get(d);
+    const vb = visitBilledMap[d];
+    const tx = txMap[d];
+    const leg = legacyMap[d];
+    const hm = homeMap[d];
+
+    const billed = (vb?.billed || 0) + (hm?.billed || 0);
+    const received = (tx?.received || 0) + (leg?.received || 0) + (hm?.advance || 0);
+    const transactions = (tx?.transactions || 0) + (leg?.transactions || 0) + (hm?.transactions || 0);
+
+    r.billed = Math.round(billed * 100) / 100;
+    r.received = Math.round(received * 100) / 100;
+    r.transactions = transactions;
+    (vb?.patients || []).forEach((p) => r.patients.add(p.toString()));
+    (hm?.homePatients || []).forEach((p) => r.patients.add(`hv:${p}`));
+    r.billedClinic = (vb?.patients || []).length;
+    r.billedHome = (hm?.transactions || 0);
+
+    cumBilled += r.billed;
+    cumReceived += r.received;
+
+    rows.push({
+      date: r.date,
+      billed: r.billed,
+      received: r.received,
+      due: Math.round(Math.max(0, cumBilled - cumReceived) * 100) / 100,
+      patients: r.patients.size,
+      clinicPatients: r.billedClinic,
+      homeVisits: r.billedHome,
+      transactions: r.transactions,
+      cumBilled: Math.round(cumBilled * 100) / 100,
+      cumReceived: Math.round(cumReceived * 100) / 100,
+    });
+  });
+
+  const totalBilled = rows.reduce((a, r) => a + r.billed, 0);
+  const totalReceived = rows.reduce((a, r) => a + r.received, 0);
+  const last = rows[rows.length - 1];
+
+  res.status(200).json(
+    new ApiResponse(200, {
+      rows,
+      summary: {
+        totalBilled: Math.round(totalBilled * 100) / 100,
+        totalReceived: Math.round(totalReceived * 100) / 100,
+        totalDue: last ? last.due : 0,
+        totalPatients: new Set(
+          Object.values(visitBilledMap).flatMap((r) => (r.patients || []).map((p) => p.toString()))
+        ).size,
+        totalTransactions: rows.reduce((a, r) => a + r.transactions, 0),
+        startDate: startStr || null,
+        endDate: endStr || null,
+      },
+    })
+  );
+});
+
+function visitRangeGrand(range) {
+  return range.$gte || range.$lte ? { visitDate: range } : {};
+}
+
+module.exports = { branchList, branchDetail, revenueReport, dayWiseRevenue };

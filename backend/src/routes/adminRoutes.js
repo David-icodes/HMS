@@ -31,6 +31,7 @@ const {
   branchList,
   branchDetail,
   revenueReport: analyticsRevenue,
+  dayWiseRevenue,
 } = require('../controllers/admin/analyticsController');
 const {
   listMasterPatients,
@@ -50,6 +51,7 @@ const {
 } = require('../controllers/admin/visitController');
 const {
   dailyRegister,
+  dailyRegisterDetail,
   staffActivity,
   staffActivityDetail,
 } = require('../controllers/admin/reportController');
@@ -68,6 +70,7 @@ const {
   addFollowUp,
   recordPayment,
   getCourseBalance,
+  listPatientCourses,
 } = require('../controllers/admin/courseController');
 const { createUserValidator, updateUserValidator } = require('../validators/authValidator');
 const { idValidator, modelValidator } = require('../validators/siteValidator');
@@ -102,6 +105,7 @@ router.post('/home-visits/:id/invoice', authorize('superAdmin', 'admin'), genera
 
 // Reports (admin)
 router.get('/daily-register', authorize('superAdmin', 'admin'), dailyRegister);
+router.get('/daily-register/detail', authorize('superAdmin', 'admin'), dailyRegisterDetail);
 router.get('/staff-activity', authorize('superAdmin', 'admin'), staffActivity);
 router.get('/staff-activity/detail', authorize('superAdmin', 'admin'), staffActivityDetail);
 
@@ -112,10 +116,12 @@ router.get('/attendance/staff-list', authorize('superAdmin', 'admin'), listStaff
 router.get('/analytics/branches', authorize('superAdmin', 'admin'), branchList);
 router.get('/analytics/branches/:id', authorize('superAdmin', 'admin'), branchDetail);
 router.get('/analytics/revenue', authorize('superAdmin', 'admin'), analyticsRevenue);
+router.get('/analytics/revenue/day-wise', authorize('superAdmin', 'admin'), dayWiseRevenue);
 
 // Courses (package-based treatment billing: one bill, many visits, many payments)
 router.post('/courses', authorize('superAdmin', 'admin'), createCourse);
 router.get('/courses/active', authorize('superAdmin', 'admin'), getActiveCourse);
+router.get('/courses/patient/:patientId', authorize('superAdmin', 'admin'), listPatientCourses);
 router.get('/courses/:id', authorize('superAdmin', 'admin'), getCourse);
 router.get('/courses/:id/visits', authorize('superAdmin', 'admin'), listCourseVisits);
 router.post('/courses/:id/follow-up', authorize('superAdmin', 'admin'), addFollowUp);

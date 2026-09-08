@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Loader2, LogOut, LayoutDashboard, Users, Home } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Users, Home, Repeat } from 'lucide-react';
 import { useStaffAuth, fetchStaffMe, STAFF_ROLES } from '@/lib/staff-auth';
 import AttendanceToggle from '@/components/staff/AttendanceToggle';
 
@@ -11,6 +11,7 @@ function titleFor(pathname: string) {
   if (pathname === '/staff') return 'Dashboard';
   if (pathname.includes('/invoice')) return 'Invoice';
   if (pathname === '/staff/patients') return 'Patients';
+  if (pathname.startsWith('/staff/follow-up')) return 'Follow-up';
   if (pathname.startsWith('/staff/home-visits')) return 'Home Visits';
   return 'Staff Portal';
 }
@@ -59,7 +60,6 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
 
   const isActive = (href: string) =>
     href === '/staff' ? pathname === '/staff' : pathname.startsWith(href);
-
   return (
     <div className="min-h-screen bg-slate-100">
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
@@ -81,16 +81,22 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
               <LayoutDashboard className="h-4 w-4" /> Dashboard
             </Link>
             <Link
-              href="/staff/home-visits"
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/home-visits') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              <Home className="h-4 w-4" /> Home Visits
-            </Link>
-            <Link
               href="/staff/patients"
               className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/patients') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <Users className="h-4 w-4" /> Patients
+            </Link>
+            <Link
+              href="/staff/follow-up"
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/follow-up') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Repeat className="h-4 w-4" /> Follow-up
+            </Link>
+            <Link
+              href="/staff/home-visits"
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/home-visits') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Home className="h-4 w-4" /> Home Visits
             </Link>
           </nav>
           <div className="flex items-center gap-3">

@@ -237,7 +237,15 @@ const listCourseVisits = asyncHandler(async (req, res) => {
     .populate('department', 'name')
     .populate('doctor', 'name')
     .populate('createdBy', 'name');
-  res.status(200).json(new ApiResponse(200, { course, visits }));
+  const patient = await Patient.findById(course.patient).select('uhid name mobile cH age gender address');
+  res.status(200).json(
+    new ApiResponse(200, {
+      course,
+      visits,
+      patient,
+      completedDays: visits.length,
+    })
+  );
 });
 
 // ---------- Add a follow-up visit (₹0 billing unless an explicit additional charge) ----------
@@ -255,7 +263,11 @@ const addFollowUp = asyncHandler(async (req, res) => {
   }
 
   const additionalCharge = money('Additional charge', b.additionalCharge);
+  const paymentAmount = money('Payment amount', b.paymentAmount);
   const method = await resolvePaymentMethod(b.paymentMethod || b.method);
+  if (paymentAmount > 0 && !method.id && !b.paymentMethod && !b.method) {
+    throw new ApiError(400, 'Payment method is required when recording a payment');
+  }
   const visitDate = b.visitDate ? new Date(b.visitDate) : new Date();
   if (Number.isNaN(visitDate.getTime())) throw new ApiError(400, 'Invalid visit date');
 
@@ -283,11 +295,18 @@ const addFollowUp = asyncHandler(async (req, res) => {
       total: additionalCharge,
     },
     payment: {
-      advanced: 0,
+      advanced: paymentAmount,
       method: method.id,
       methodName: method.name,
-      due: additionalCharge,
-      status: additionalCharge > 0 ? 'Due' : 'Paid',
+      due: Math.max(0, round2(additionalCharge - paymentAmount)),
+      status:
+        paymentAmount > 0
+          ? additionalCharge > 0 && paymentAmount < additionalCharge
+            ? 'Partial'
+            : 'Paid'
+          : additionalCharge > 0
+            ? 'Due'
+            : 'Paid',
     },
     createdBy: req.user._id,
     signature: b.signature?.trim() || undefined,
@@ -298,14 +317,38 @@ const addFollowUp = asyncHandler(async (req, res) => {
   }
   course.dayNumber = nextDay;
   if (nextDay >= course.totalDays) course.status = 'Completed';
-  course.due = Math.max(0, round2(courseBilled(course) - (course.paid || 0)));
+
+  // Record a payment for this day (one PaymentTransaction, counted once). A
+  // follow-up with no money received creates NO transaction and NO revenue.
+  let payment = null;
+  if (paymentAmount > 0) {
+    payment = await PaymentTransaction.create({
+      patientId: course.patient,
+      courseId: course._id,
+      visitId: visit._id,
+      amount: paymentAmount,
+      paymentMethod: method.name || undefined,
+      paymentMethodId: method.id,
+      paymentDate: visitDate,
+      branchId: b.branch || course.branch,
+      note: b.paymentNote?.trim() || undefined,
+      createdBy: req.user._id,
+    });
+  }
+
+  const { paid } = await refreshCourseLedger(course, req.user._id);
+  course.dayNumber = nextDay;
+  if (nextDay >= course.totalDays) course.status = 'Completed';
+  course.due = Math.max(0, round2(courseBilled(course) - paid));
   await course.save();
 
   const full = await Course.findById(course._id)
     .populate('branch', 'name')
     .populate('department', 'name')
     .populate('doctor', 'name');
-  res.status(201).json(new ApiResponse(201, { course: full, visit }, `Day ${nextDay} follow-up added`));
+  res.status(201).json(
+    new ApiResponse(201, { course: full, visit, payment }, `Day ${nextDay} follow-up added`)
+  );
 });
 
 // ---------- Record a course payment (one PaymentTransaction, counted once) ----------
@@ -363,6 +406,60 @@ const getCourseBalance = asyncHandler(async (req, res) => {
   );
 });
 
+// ---------- All courses for a patient (follow-up page) ----------
+// Returns every course for a patient (active, completed, cancelled) with its
+// billed/paid/due (from the PaymentTransaction ledger) and its visits.
+const listPatientCourses = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.patientId)) throw new ApiError(400, 'Invalid patient id');
+  const patient = await Patient.findById(req.params.patientId).select('uhid name mobile age gender cH fN address');
+  if (!patient) throw new ApiError(404, 'Patient not found');
+
+  const courses = await Course.find({ patient: patient._id })
+    .sort({ createdAt: -1 })
+    .populate('branch', 'name')
+    .populate('department', 'name')
+    .populate('doctor', 'name');
+
+  const courseIds = courses.map((c) => c._id);
+  const visits = await Visit.find({ courseId: { $in: courseIds } })
+    .sort({ dayNumber: 1, visitDate: 1 })
+    .populate('department', 'name')
+    .populate('doctor', 'name');
+
+  const payAgg = await PaymentTransaction.aggregate([
+    { $match: { courseId: { $in: courseIds } } },
+    { $group: { _id: '$courseId', paid: { $sum: '$amount' }, transactions: { $sum: 1 } } },
+  ]);
+  const payMap = {};
+  payAgg.forEach((p) => (payMap[p._id.toString()] = p));
+
+  const visitsByCourse = {};
+  visits.forEach((v) => {
+    const k = v.courseId ? v.courseId.toString() : 'none';
+    (visitsByCourse[k] = visitsByCourse[k] || []).push(v);
+  });
+
+  const rows = courses.map((c) => {
+    const paid = round2(payMap[c._id.toString()]?.paid || 0);
+    const billed = courseBilled(c);
+    return {
+      course: {
+        ...c.toObject(),
+        paid,
+        due: Math.max(0, round2(billed - paid)),
+      },
+      billed,
+      paid,
+      due: Math.max(0, round2(billed - paid)),
+      transactions: payMap[c._id.toString()]?.transactions || 0,
+      visits: visitsByCourse[c._id.toString()] || [],
+      completedDays: (visitsByCourse[c._id.toString()] || []).length,
+    };
+  });
+
+  res.status(200).json(new ApiResponse(200, { patient, courses: rows }));
+});
+
 module.exports = {
   createCourse,
   getActiveCourse,
@@ -371,4 +468,5 @@ module.exports = {
   addFollowUp,
   recordPayment,
   getCourseBalance,
+  listPatientCourses,
 };

@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Patient = require('../../models/Patient');
 const Visit = require('../../models/Visit');
 const HomeVisit = require('../../models/HomeVisit');
+const Course = require('../../models/Course');
 const PaymentMethod = require('../../models/PaymentMethod');
 const Branch = require('../../models/Branch');
 const Department = require('../../models/Department');
@@ -66,22 +67,42 @@ const searchPatients = asyncHandler(async (req, res) => {
     { mobile: new RegExp(term, 'i') },
   ];
   if (digits) or.push({ mobile: new RegExp(digits) });
-  const patients = await Patient.find({ $or: or }).sort({ createdAt: -1 }).limit(20);
+
+  let patients = await Patient.find({ $or: or }).sort({ createdAt: -1 }).limit(20);
+
+  // If matched by OP number only, nurses it through OP-bearing visits.
+  if (patients.length === 0) {
+    const opVisits = await Visit.find({ opNumber: new RegExp(term, 'i') })
+      .select('patient')
+      .limit(20)
+      .lean();
+    const ids = [...new Set(opVisits.map((v) => v.patient))]
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (ids.length) {
+      patients = await Patient.find({ _id: { $in: ids } }).sort({ createdAt: -1 });
+    }
+  }
 
   const out = await Promise.all(
     patients.map(async (p) => {
-      const [visits, outstandingAgg] = await Promise.all([
+      const [visits, outstandingAgg, activeCourse] = await Promise.all([
         Visit.find({ patient: p._id }).sort({ visitDate: -1 }).limit(5).select('visitDate visitType department doctor opNumber charges payment diagnosis'),
         Visit.aggregate([
           { $match: { patient: p._id, 'payment.status': { $in: ['Due', 'Partial'] } } },
           { $group: { _id: null, due: { $sum: '$payment.due' } } },
         ]),
+        Course.findOne({ patient: p._id, status: 'Active' })
+          .sort({ createdAt: -1 })
+          .populate('department', 'name')
+          .populate('doctor', 'name')
+          .select('courseNo status totalDays dayNumber courseAmount paid due treatment'),
       ]);
       return {
         ...p.toObject(),
         lastVisit: visits[0] || null,
         visitCount: await Visit.countDocuments({ patient: p._id }),
         outstanding: outstandingAgg[0]?.due || 0,
+        activeCourse,
       };
     })
   );

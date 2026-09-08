@@ -19,6 +19,102 @@ const parseRange = (from, to) => {
   return range;
 };
 
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// ---------- Daily register detail (one row per patient entry) ----------
+// Detailed daily register with financials and the branch resolved to its name in
+// EVERY row, so both the on-screen table and the Excel export carry the branch.
+// Columns: Date, Branch, C/H, Patient Name, UHID, OP Number / Home S.No,
+// Department, Doctor, Visit Type, Course Day, Course Progress, Total Billing,
+// Paid, Due, Payment Method, Created By.
+const dailyRegisterDetail = asyncHandler(async (req, res) => {
+  const { from, to, branch } = req.query;
+  const range = parseRange(from, to);
+
+  const clinicMatch = {};
+  if (range.$gte || range.$lte) clinicMatch.visitDate = range;
+  if (branch && mongoose.isValidObjectId(branch)) clinicMatch.branch = new mongoose.Types.ObjectId(branch);
+
+  const homeMatch = {};
+  if (range.$gte || range.$lte) homeMatch.createdAt = range;
+  if (branch && mongoose.isValidObjectId(branch)) homeMatch.branch = new mongoose.Types.ObjectId(branch);
+
+  const [clinicRows, homeRows] = await Promise.all([
+    Visit.find(clinicMatch)
+      .sort({ visitDate: 1, createdAt: 1 })
+      .populate('branch', 'name')
+      .populate('department', 'name')
+      .populate('doctor', 'name')
+      .populate('patient', 'name mobile uhid')
+      .populate('createdBy', 'name'),
+    HomeVisit.find(homeMatch)
+      .sort({ createdAt: 1 })
+      .populate('branch', 'name')
+      .populate('createdBy', 'name'),
+  ]);
+
+  const out = [
+    ...clinicRows.map((v) => {
+      const billed = round2(v.charges?.total);
+      const paid = round2(v.payment?.advanced);
+      const due = v.payment && v.payment.due !== undefined ? round2(v.payment.due) : round2(Math.max(0, billed - paid));
+      const courseDay = v.dayNumber || '';
+      const courseProgress = v.totalDays ? (v.dayNumber ? `${v.dayNumber}/${v.totalDays}` : '') : '';
+      return {
+        date: v.visitDate ? new Date(v.visitDate).toISOString().slice(0, 10) : '',
+        branch: v.branch && v.branch.name ? v.branch.name : 'Unassigned',
+        cH: 'Clinic',
+        patientName: v.patient && v.patient.name ? v.patient.name : '',
+        uhid: v.patient && v.patient.uhid ? v.patient.uhid : '',
+        opNo: v.opNumber || '',
+        serialNo: '',
+        department: v.department && v.department.name ? v.department.name : '',
+        doctor: v.doctor && v.doctor.name ? v.doctor.name : '',
+        visitType: v.visitType || 'New OP',
+        courseDay,
+        courseProgress,
+        billed,
+        paid,
+        due,
+        paymentMethod: v.payment && v.payment.methodName ? v.payment.methodName : '',
+        createdBy: v.createdBy && v.createdBy.name ? v.createdBy.name : '',
+      };
+    }),
+    ...homeRows.map((h) => {
+      const billed = round2(h.total ?? (h.perSession || 0) * (h.sessions || 1));
+      const paid = round2(h.advance);
+      const due = round2(h.due ?? Math.max(0, billed - paid));
+      return {
+        date: h.createdAt ? new Date(h.createdAt).toISOString().slice(0, 10) : '',
+        branch: h.branch && h.branch.name ? h.branch.name : 'Unassigned',
+        cH: 'Home',
+        patientName: h.patientName || '',
+        uhid: '',
+        opNo: '',
+        serialNo: h.serialNo || '',
+        department: '',
+        doctor: h.referralDoctor || '',
+        visitType: 'Home Visit',
+        courseDay: '',
+        courseProgress: '',
+        billed,
+        paid,
+        due,
+        paymentMethod: h.paymentMethod || '',
+        createdBy: h.createdBy && h.createdBy.name ? h.createdBy.name : '',
+      };
+    }),
+  ];
+  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.patientName.localeCompare(b.patientName)));
+
+  const totals = out.reduce(
+    (acc, r) => ({ billed: acc.billed + r.billed, paid: acc.paid + r.paid, due: acc.due + r.due }),
+    { billed: 0, paid: 0, due: 0 }
+  );
+
+  res.status(200).json(new ApiResponse(200, { data: out, totals, count: out.length }));
+});
+
 // ---------- Daily register: Clinic + Home Visits = Total (per date, per branch) ----------
 // Clinic/OP count comes from Visit documents (visitDate), Home Visits from HomeVisit
 // documents (createdAt date). Purely operational counts, not revenue.
@@ -270,4 +366,4 @@ const staffActivityDetail = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, { data: out }));
 });
 
-module.exports = { dailyRegister, staffActivity, staffActivityDetail };
+module.exports = { dailyRegister, dailyRegisterDetail, staffActivity, staffActivityDetail };
