@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Loader2, ChevronLeft, Plus, Banknote, X } from 'lucide-react';
+import { Loader2, ChevronLeft, Plus, Banknote, X, Phone, Hash, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { staffFetch } from '@/lib/staff-auth';
 import { useStaffReference } from '@/hooks/use-staff-reference';
@@ -14,30 +14,41 @@ interface CourseRowVisit extends Visit {
   paymentStatus?: string;
 }
 
+interface CourseDetailPayload {
+  course?: CourseDetailCourse;
+  billed?: number;
+  paid?: number;
+  due?: number;
+  balance?: number;
+  initialAdvance?: number;
+  patient?: Patient;
+  visits?: CourseRowVisit[];
+  payments?: Array<{ _id: string; amount: number; paymentMethod?: string; paymentDate: string }>;
+  completedDays?: number;
+}
+
+interface CourseDetailCourse {
+  _id: string;
+  courseNo: string;
+  treatment?: string;
+  branch?: { _id: string; name: string } | null;
+  department?: { _id: string; name: string } | null;
+  doctor?: { _id: string; name: string } | null;
+  totalDays: number;
+  dayNumber: number;
+  startDate: string;
+  courseAmount: number;
+  additionalCharges: number;
+  initialAdvance?: number;
+  paid: number;
+  due: number;
+  billed?: number;
+  balance?: number;
+  status: string;
+}
+
 interface CourseDetailRes {
-  data: {
-    patient: Patient;
-    course: {
-      _id: string;
-      courseNo: string;
-      treatment?: string;
-      branch?: { _id: string; name: string } | null;
-      department?: { _id: string; name: string } | null;
-      doctor?: { _id: string; name: string } | null;
-      totalDays: number;
-      dayNumber: number;
-      startDate: string;
-      courseAmount: number;
-      additionalCharges: number;
-      paid: number;
-      due: number;
-      billed: number;
-      status: string;
-    };
-    visits: CourseRowVisit[];
-    payments: Array<{ _id: string; amount: number; paymentMethod?: string; paymentDate: string }>;
-    completedDays: number;
-  };
+  data: CourseDetailPayload;
 }
 
 const inputCls =
@@ -47,7 +58,7 @@ export default function CourseDetailPage() {
   const params = useParams<{ patientId: string; courseId: string }>();
   const { courseId } = params;
   const { paymentMethods } = useStaffReference();
-  const [data, setData] = useState<CourseDetailRes['data'] | null>(null);
+  const [payload, setPayload] = useState<CourseDetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -74,18 +85,8 @@ export default function CourseDetailPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await staffFetch<CourseDetailRes>(
-        `/api/staff/courses/${courseId}/visits`
-      );
-      const course = res.data.course;
-      const agg = await staffFetch<{ data: { billed: number; paid: number; due: number; transactions: number } }>(
-        `/api/staff/courses/${courseId}/balance`
-      );
-      setData({
-        ...res.data,
-        course: { ...course, ...agg.data },
-        payments: agg.data.transactions ? [] : [],
-      });
+      const res = await staffFetch<CourseDetailRes>(`/api/staff/courses/${courseId}/visits`);
+      setPayload(res.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load course');
     } finally {
@@ -99,7 +100,7 @@ export default function CourseDetailPage() {
 
   const addFollowUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!data) return;
+    if (!payload) return;
     if (!follow.treatment.trim() && !follow.diagnosis.trim()) {
       toast.error('Enter treatment or diagnosis for this follow-up');
       return;
@@ -136,7 +137,7 @@ export default function CourseDetailPage() {
 
   const recordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!data) return;
+    if (!payload) return;
     const amount = Number(pay.amount) || 0;
     if (amount <= 0) {
       toast.error('Enter an amount greater than zero');
@@ -180,32 +181,50 @@ export default function CourseDetailPage() {
     return <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">{error}</div>;
   }
 
-  if (!data) return null;
+  if (!payload) return null;
 
-  const course = data.course;
-  const billed = course.billed ?? course.courseAmount + (course.additionalCharges || 0);
+  const course = (payload.course || payload) as CourseDetailCourse;
+  const patient = payload.patient;
+  const visits = payload.visits || [];
+  const payments = payload.payments || [];
+  const completedDays = payload.completedDays ?? visits.length;
+
+  const billed = course.billed ?? payload.billed ?? course.courseAmount + (course.additionalCharges || 0);
+  const paid = course.paid ?? payload.paid ?? 0;
+  const due = course.due ?? payload.due ?? Math.max(0, billed - paid);
+  const balance = course.balance ?? payload.balance ?? Math.max(0, paid - billed);
+  const initialAdvance = course.initialAdvance ?? payload.initialAdvance ?? 0;
   const totalDays = course.totalDays || 1;
-  const payAuto = computePayment(billed, course.paid);
+  const currentDay = course.dayNumber || Math.min(completedDays + 1, totalDays);
+  const payAuto = computePayment(billed, paid);
+
+  const visitsByDay: Record<number, CourseRowVisit> = {};
+  visits.forEach((v) => {
+    if (v.dayNumber) visitsByDay[v.dayNumber] = v;
+  });
+  const dayRows = Array.from({ length: totalDays }, (_, i) => i + 1);
+
+  const latestPayment = payments[payments.length - 1];
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <Link
-          href={`/staff/follow-up/${data.patient._id}`}
+          href={`/staff/follow-up/${patient?._id ?? ''}`}
           className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-teal-600"
         >
-          <ChevronLeft className="h-3.5 w-3.5" /> {data.patient.name}
+          <ChevronLeft className="h-3.5 w-3.5" /> {patient?.name || 'Back'}
         </Link>
         <div className="flex items-center gap-2">
-          {course.status === 'Active' && data.completedDays < totalDays && (
+          {course.status === 'Active' && completedDays < totalDays && (
             <button
               onClick={() => { setPayMode(false); setFollow({ ...emptyFollow, visitDate: new Date().toISOString().slice(0, 10) }); setFollowMode(true); }}
               className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
             >
-              <Plus className="h-4 w-4" /> Add Day {data.completedDays + 1}
+              <Plus className="h-4 w-4" /> Add Day {completedDays + 1}
             </button>
           )}
-          {course.due > 0 && (
+          {due > 0 && (
             <button
               onClick={() => { setFollowMode(false); setPay({ ...emptyPay, paymentDate: new Date().toISOString().slice(0, 10) }); setPayMode(true); }}
               className="inline-flex items-center gap-2 rounded-lg border border-teal-600 px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50"
@@ -216,42 +235,77 @@ export default function CourseDetailPage() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-md bg-teal-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-teal-700">
-            {course.courseNo}
-          </span>
-          <span
-            className={`rounded-md px-2 py-1 text-[10px] font-bold uppercase ${
-              course.status === 'Completed'
-                ? 'bg-emerald-50 text-emerald-700'
-                : course.status === 'Active'
-                  ? 'bg-amber-50 text-amber-700'
-                  : 'bg-slate-100 text-slate-500'
-            }`}
-          >
-            {course.status}
-          </span>
-          <h2 className="text-sm font-bold text-slate-900">
-            {course.treatment || 'Course'} {course.department ? `• ${course.department.name}` : ''}{' '}
-            {course.doctor ? `• Dr. ${course.doctor.name}` : ''}
-          </h2>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-teal-50 text-teal-700">
+              <UserRound className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-slate-900">{patient?.name || 'Patient'}</h2>
+                <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                  {patient?.cH || 'Clinic'}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                <span className="inline-flex items-center gap-1"><Hash className="h-3 w-3" /> {patient?.uhid || '—'}</span>
+                <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {patient?.mobile || '—'}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md bg-teal-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-teal-700">
+              {course.courseNo}
+            </span>
+            <span
+              className={`rounded-md px-2 py-1 text-[10px] font-bold uppercase ${
+                course.status === 'Completed'
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : course.status === 'Active'
+                    ? 'bg-amber-50 text-amber-700'
+                    : 'bg-slate-100 text-slate-500'
+              }`}
+            >
+              {course.status}
+            </span>
+          </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-6">
-          <Stat label="Total Billing" value={inr(billed)} />
-          <Stat label="Total Paid" value={inr(course.paid)} accent="text-teal-700" />
-          <Stat label="Due" value={inr(course.due)} accent="text-amber-600" />
-          <Stat label="Progress" value={`${data.completedDays}/${totalDays} days`} />
+        <p className="mt-2 text-sm font-semibold text-slate-700">
+          {course.treatment || 'Course'} {course.department ? `• ${course.department.name}` : ''}{' '}
+          {course.doctor ? `• Dr. ${course.doctor.name}` : ''} {course.branch ? `• ${course.branch.name}` : ''}
+        </p>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+          <Stat label="Progress" value={`Day ${currentDay} of ${totalDays}`} />
+          <Stat label="Billed" value={inr(billed)} />
+          <Stat label="Paid" value={inr(paid)} accent="text-teal-700" />
+          <Stat label="Due" value={inr(due)} accent="text-amber-600" />
+          <Stat label="Balance" value={inr(balance)} accent={balance > 0 ? 'text-emerald-700' : ''} />
+          <Stat label="Initial Advance" value={inr(initialAdvance)} />
           <Stat label="Start Date" value={new Date(course.startDate).toLocaleDateString('en-IN')} />
-          <Stat label="Branch" value={course.branch?.name || '—'} />
+          <Stat
+            label="Latest Payment"
+            value={
+              latestPayment
+                ? `${inr(latestPayment.amount)}${latestPayment.paymentMethod ? ` • ${latestPayment.paymentMethod}` : ''}${latestPayment.paymentDate ? ` • ${new Date(latestPayment.paymentDate).toLocaleDateString('en-IN')}` : ''}`
+                : '—'
+            }
+          />
         </div>
+
+        {balance > 0 && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+            Balance refundable / credit — ₹{balance.toLocaleString('en-IN')} is available in the patient&apos;s favour.
+          </div>
+        )}
       </div>
 
       {followMode && (
         <form onSubmit={addFollowUp} className="rounded-2xl border border-teal-200 bg-teal-50/40 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900">Day {data.completedDays + 1} Follow-up</h3>
+            <h3 className="text-sm font-bold text-slate-900">Day {completedDays + 1} Follow-up</h3>
             <button type="button" onClick={() => setFollowMode(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
               <X className="h-4 w-4" />
             </button>
@@ -290,7 +344,7 @@ export default function CourseDetailPage() {
             className="mt-4 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            {saving ? 'Saving…' : `Save Day ${data.completedDays + 1}`}
+            {saving ? 'Saving…' : `Save Day ${completedDays + 1}`}
           </button>
         </form>
       )}
@@ -348,29 +402,41 @@ export default function CourseDetailPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {data.visits.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
-                  No follow-ups recorded yet.
-                </td>
-              </tr>
-            )}
-            {data.visits.map((v) => {
+            {dayRows.map((day) => {
+              const v = visitsByDay[day];
+              if (!v) {
+                return (
+                  <tr key={day} className="bg-slate-50/60">
+                    <td className="px-3 py-2.5 font-bold text-slate-800">Day {day}</td>
+                    <td className="px-3 py-2.5 text-slate-400">Pending</td>
+                    <td className="px-3 py-2.5 text-slate-400">—</td>
+                    <td className="px-3 py-2.5 text-right text-slate-400">₹0</td>
+                    <td className="px-3 py-2.5 text-right text-slate-400">₹0</td>
+                    <td className="px-3 py-2.5 text-slate-400">—</td>
+                    <td className="px-3 py-2.5 text-right text-slate-400">₹0</td>
+                    <td className="px-3 py-2.5">
+                      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-500">
+                        Pending
+                      </span>
+                    </td>
+                  </tr>
+                );
+              }
               const charges = v.charges?.total ?? 0;
-              const paid = v.payment?.advanced ?? 0;
-              const due = v.payment?.due ?? Math.max(0, charges - paid);
-              const status = v.payment?.status || (paid >= charges ? 'Paid' : 'Due');
+              const pAdv = v.payment?.advanced ?? 0;
+              const pDue = v.payment?.due ?? Math.max(0, charges - pAdv);
+              const status = v.payment?.status || (pAdv >= charges ? 'Paid' : 'Due');
               return (
                 <tr key={v._id} className="hover:bg-slate-50">
-                  <td className="px-3 py-2.5 font-bold text-slate-800">Day {v.dayNumber ?? '?'}</td>
+                  <td className="px-3 py-2.5 font-bold text-slate-800">Day {day}</td>
                   <td className="px-3 py-2.5 text-slate-600">
                     {v.visitDate ? new Date(v.visitDate).toLocaleDateString('en-IN') : '—'}
                   </td>
                   <td className="px-3 py-2.5 text-slate-600">{v.treatment || v.diagnosis || '—'}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-slate-700">{inr(charges)}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-teal-700">{inr(paid)}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold text-teal-700">{inr(pAdv)}</td>
                   <td className="px-3 py-2.5 text-slate-600">{v.payment?.methodName || '—'}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(due)}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(pDue)}</td>
                   <td className="px-3 py-2.5">
                     <span
                       className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
@@ -390,7 +456,7 @@ export default function CourseDetailPage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="font-semibold text-slate-600">
-            Final status: <span className="text-slate-900">{payAuto.status}</span> (billed {inr(billed)}, paid {inr(course.paid)}, due {inr(course.due)})
+            Final status: <span className="text-slate-900">{payAuto.status}</span> (billed {inr(billed)}, paid {inr(paid)}, due {inr(due)})
           </p>
           <p className="text-slate-400">Follow-ups with no money received are not billed or counted as revenue.</p>
         </div>

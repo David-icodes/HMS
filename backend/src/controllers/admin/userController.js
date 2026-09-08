@@ -90,4 +90,12 @@ const deleteUser = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, null, 'User deleted successfully'));
 });
 
-module.exports = { listUsers, createUser, updateUser, deleteUser };
+// ---------- Staff list (for OP-form autocomplete / staff analytics filters) ----------
+const listStaff = asyncHandler(async (req, res) => {
+  const users = await User.find({ isActive: true })
+    .sort({ name: 1 })
+    .select('name role username email mobileNumber');
+  res.status(200).json(new ApiResponse(200, users));
+});
+
+module.exports = { listUsers, createUser, updateUser, deleteUser, listStaff };

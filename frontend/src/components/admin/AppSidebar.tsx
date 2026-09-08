@@ -28,6 +28,7 @@ import {
   Server,
   IndianRupee,
   ChartColumn,
+  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '@/lib/admin-auth';
 
@@ -75,6 +76,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { key: 'revenue', label: 'Revenue', href: '/admin/revenue', icon: IndianRupee, category: 'analytics' },
       { key: 'branch-reports', label: 'Branch Reports', href: '/admin/branch-reports', icon: ChartColumn, category: 'analytics' },
+      { key: 'staff', label: 'Staff', href: '/admin/staff', icon: UserCheck, category: 'analytics' },
     ],
   },
   {

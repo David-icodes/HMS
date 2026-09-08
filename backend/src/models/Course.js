@@ -16,11 +16,17 @@ const courseSchema = new mongoose.Schema(
     endDate: { type: Date },
     courseAmount: { type: Number, default: 0, min: 0 },
     additionalCharges: { type: Number, default: 0, min: 0 },
+    // Money already received for this course outside of PaymentTransactions
+    // (e.g. handed over before the course was registered). Counted towards paid,
+    // never creates a transaction.
+    initialAdvance: { type: Number, default: 0, min: 0 },
     paid: { type: Number, default: 0, min: 0 },
     due: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ['Active', 'Completed', 'Cancelled'], default: 'Active' },
     notes: { type: String, trim: true, maxlength: 500 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Staff name snapshot so reports keep working if the user record is later removed.
+    createdByName: { type: String, trim: true },
   },
   { timestamps: true }
 );

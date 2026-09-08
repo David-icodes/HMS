@@ -16,6 +16,9 @@ const chargesSchema = new mongoose.Schema(
 
 const paymentSchema = new mongoose.Schema(
   {
+    // Money already paid before this visit (never creates a transaction).
+    previousAdvance: { type: Number, default: 0, min: 0 },
+    // Money received at this visit (amount paid now).
     advanced: { type: Number, default: 0, min: 0 },
     method: { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
     methodName: { type: String, trim: true },
@@ -45,6 +48,8 @@ const visitSchema = new mongoose.Schema(
     payment: { type: paymentSchema, default: () => ({}) },
     invoiceNumber: { type: String, trim: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Staff name snapshot so reports keep working if the user record is later removed.
+    createdByName: { type: String, trim: true },
     signature: { type: String, trim: true },
     // Optional course linkage: follow-up visits belong to a Course and never create
     // a new billing event on their own (billing is the course + explicit add-ons).

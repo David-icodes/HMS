@@ -36,6 +36,16 @@ const buildVisitFilter = (q) => {
   return filter;
 };
 
+// C/H split is patient-based: patients whose C/H is Home (free-text, case/space
+// tolerant) own Home revenue; everything else is Clinic. Legacy HomeVisit documents
+// (standalone records) always count as Home.
+const HOME_CH_RE = /^\s*home\s*$/i;
+
+const homePatientIds = async () => {
+  const ids = await Patient.distinct('_id', { cH: HOME_CH_RE });
+  return ids;
+};
+
 // ---------- Branch list with per-branch aggregates ----------
 const branchList = asyncHandler(async (req, res) => {
   const filter = buildVisitFilter(req.query);
@@ -164,19 +174,26 @@ const buildTxFilter = (q) => {
 
 const revenueReport = asyncHandler(async (req, res) => {
   const q = req.query;
-  // Clinic-Home filter is service-based and disjoint:
-  //   Home   = money received via Home Visits only,
-  //   Clinic = all the rest (OP).
+  // Clinic-Home filter is patient-based and disjoint:
+  //   Home   = money belonging to patients marked C/H = Home (+ legacy Home Visits),
+  //   Clinic = everyone else (OP).
   // Each view therefore sums exactly to the full (no-ch) report.
   const chKey = q.ch ? String(q.ch).toLowerCase() : '';
   const chHome = chKey.startsWith('h');
   const chClinic = !!chKey && !chHome;
+  const homeIds = await homePatientIds();
 
   const filter = buildVisitFilter(q);
   const txFilter = buildTxFilter(q);
-  if (chHome) txFilter.homeVisitId = { $ne: null };
-  if (chClinic) txFilter.homeVisitId = null;
+  if (chKey) {
+    const conds = chHome
+      ? [{ patientId: { $in: homeIds } }, { homeVisitId: { $ne: null } }]
+      : [{ patientId: { $nin: homeIds } }, { homeVisitId: null }];
+    txFilter.$or = txFilter.$or ? [...txFilter.$or, ...conds] : conds;
+  }
   const homeFilter = buildHomeVisitFilter(q);
+
+  const visitScope = chHome ? { patient: { $in: homeIds } } : chClinic ? { patient: { $nin: homeIds } } : {};
 
   // Money already captured by PaymentTransactions (attribute once to that ledger).
   const [txSummary, txBranchAgg, txMethodAgg, coveredSets] = await Promise.all([
@@ -211,22 +228,22 @@ const revenueReport = asyncHandler(async (req, res) => {
         PaymentTransaction.distinct('courseId', { ...txFilter, courseId: { $ne: null } }),
         PaymentTransaction.distinct('visitId', { ...txFilter, visitId: { $ne: null } }),
       ]);
-      return { courses: new Set(courses.map(String)), visits: new Set(visits.map(String)) };
+      return { courses, visits };
     })(),
   ]);
 
   // Legacy OP fallback: visits whose money is NOT represented in PaymentTransactions.
-  // Apply the Clinic/Home split: legacy OP money belongs to Clinic; Home money is its own.
+  // Clinic/Home split follows the patient's C/H classification.
   const legacyMatch = {
     ...filter,
     'payment.advanced': { $gt: 0 },
     $or: [
       { courseId: null },
-      { courseId: { $nin: [...coveredSets.courses] } },
+      { courseId: { $nin: coveredSets.courses } },
     ],
-    _id: { $nin: [...coveredSets.visits] },
+    _id: { $nin: coveredSets.visits },
   };
-  if (chHome) legacyMatch._id = { $in: [] };
+  if (chKey) legacyMatch.patient = visitScope.patient;
   const [legacySummary, legacyBranchAgg, legacyMethodAgg] = await Promise.all([
     Visit.aggregate([
       { $match: legacyMatch },
@@ -273,7 +290,7 @@ const revenueReport = asyncHandler(async (req, res) => {
   // follow-ups are ₹0, additional charges add in only when explicitly billed.
   const [visitBilledAgg, visitPatientsAgg] = await Promise.all([
     Visit.aggregate([
-      { $match: chHome ? { _id: { $in: [] } } : filter },
+      { $match: { ...filter, ...visitScope } },
       {
         $group: {
           _id: null,
@@ -282,7 +299,7 @@ const revenueReport = asyncHandler(async (req, res) => {
       },
     ]),
     Visit.aggregate([
-      { $match: chHome ? { _id: { $in: [] } } : filter },
+      { $match: { ...filter, ...visitScope } },
       { $group: { _id: null, patients: { $addToSet: '$patient' } } },
     ]),
   ]);
@@ -335,18 +352,46 @@ const revenueReport = asyncHandler(async (req, res) => {
   const billedFromVisits = visitBilledAgg[0]?.totalBilled || 0;
   let totalPatients = (visitPatientsAgg[0]?.patients || []).length;
   if (chHome) {
-    // Home view: patient count = distinct patients in the filtered home visits.
-    const homePatients = await HomeVisit.aggregate([
-      { $match: homeMatch },
-      { $group: { _id: '$patient', n: { $sum: 1 } } },
-      { $group: { _id: null, patients: { $sum: 1 } } },
+    // Home view: distinct patients from home-patient visits + home transactions
+    // (legacy standalone HomeVisit documents are counted as Home Visits, not patients).
+    const [homeVisitPatients, homeTxPatients] = await Promise.all([
+      Visit.aggregate([
+        { $match: { ...filter, patient: { $in: homeIds } } },
+        { $group: { _id: null, patients: { $addToSet: '$patient' } } },
+      ]),
+      PaymentTransaction.aggregate([
+        { $match: { ...txFilter, patientId: { $ne: null } } },
+        { $group: { _id: null, patients: { $addToSet: '$patientId' } } },
+      ]),
     ]);
-    totalPatients = homePatients[0]?.patients || 0;
+    const set = new Set([
+      ...(homeVisitPatients[0]?.patients || []).map(String),
+      ...(homeTxPatients[0]?.patients || []).map(String),
+    ]);
+    totalPatients = set.size;
+  } else if (chClinic) {
+    // Clinic view: distinct patients from clinic visits plus clinic transactions.
+    const clinicTxPatients = await PaymentTransaction.aggregate([
+      { $match: { ...txFilter, patientId: { $ne: null } } },
+      { $group: { _id: null, patients: { $addToSet: '$patientId' } } },
+    ]);
+    const set = new Set([...(visitPatientsAgg[0]?.patients || []).map(String), ...(clinicTxPatients[0]?.patients || []).map(String)]);
+    totalPatients = set.size;
+  } else {
+    const allTxPatients = await PaymentTransaction.aggregate([
+      { $match: { ...txFilter, patientId: { $ne: null } } },
+      { $group: { _id: null, patients: { $addToSet: '$patientId' } } },
+    ]);
+    totalPatients = new Set([
+      ...(visitPatientsAgg[0]?.patients || []).map(String),
+      ...(allTxPatients[0]?.patients || []).map(String),
+    ]).size;
   }
 
   const totalBilled = Math.max(0, Math.round((billedFromVisits + (homeS.totalBilled || 0)) * 100) / 100);
   const totalPaid = Math.max(0, Math.round(((txS.revenue || 0) + (legS.totalPaid || 0) + (homeS.totalPaid || 0)) * 100) / 100);
   const totalDue = Math.max(0, Math.round((totalBilled - totalPaid) * 100) / 100);
+  const totalBalance = Math.max(0, Math.round((totalPaid - totalBilled) * 100) / 100);
   const totalTransactions = (txS.transactions || 0) + (legS.transactions || 0) + (homeS.transactions || 0);
 
   // ---- Branch rows ----
@@ -373,7 +418,7 @@ const revenueReport = asyncHandler(async (req, res) => {
   };
   // OP billed + legacy paid + clinic patient counts.
   const visitBranchBilled = await Visit.aggregate([
-    { $match: chHome ? { _id: { $in: [] } } : filter },
+    { $match: { ...filter, ...visitScope } },
     {
       $group: {
         _id: '$branch',
@@ -410,6 +455,7 @@ const revenueReport = asyncHandler(async (req, res) => {
   const branchRows = Object.values(branchById).map((b) => ({
     ...b,
     totalDue: Math.max(0, Math.round((b.totalBilled - b.totalPaid) * 100) / 100),
+    totalBalance: Math.max(0, Math.round((b.totalPaid - b.totalBilled) * 100) / 100),
     totalPatients: b.clinicPatients + b.homeVisits,
   }));
 
@@ -454,6 +500,7 @@ const revenueReport = asyncHandler(async (req, res) => {
         totalBilled,
         totalPaid,
         totalDue,
+        totalBalance,
         totalPatients,
         totalTransactions,
       },
@@ -467,16 +514,23 @@ const revenueReport = asyncHandler(async (req, res) => {
 // Each row = one calendar day with:
 //   date       - day (YYYY-MM-DD)
 //   billed     - money billed that day (course billed once day-1, follow-ups ₹0, +
-//                 explicit additional charges billed that day, + home visits billed that day)
+//                 explicit additional charges billed that day, + home entries billed that day)
 //   received   - actual money received that day (PaymentTransaction by paymentDate +
 //                 legacy OP advanced not covered by a transaction + home visit advance)
 //   transactions - count of actual financial payments that day
 //   patients   - distinct patients billed that day (clinic patients + home patients)
 //   due        - CUMULATIVE (running billed - running received up to & incl. that day)
+//   balance    - CUMULATIVE excess (running received - running billed), never negative
 // Billing date is the bill (visitDate / createdAt) date; payment date is the actual
 // payment (paymentDate) date. A follow-up day never re-bills, so it never inflates Due.
+// C/H filter (ch = All | Clinic | Home) is patient-based.
 const dayWiseRevenue = asyncHandler(async (req, res) => {
   const q = req.query;
+  const chKey = String(q.ch || '').toLowerCase();
+  const chHome = chKey === 'home';
+  const chClinic = chKey === 'clinic';
+  const homeIds = await homePatientIds();
+
   const branchFilter = (field) => {
     const f = {};
     if (q.branch && mongoose.isValidObjectId(q.branch)) f[field] = new mongoose.Types.ObjectId(q.branch);
@@ -489,7 +543,6 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
 
   // What dates should we enumerate? If a single date (date or from==to) -> 1 day.
   // Else enumerate every day between from..to.
-  const dayList = [];
   const daySet = new Map();
   const addDay = (iso) => {
     if (!daySet.has(iso)) {
@@ -503,10 +556,14 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
 
   if (startStr) addDay(String(startStr).slice(0, 10));
 
-  // ---- Billing from OP visits (visitDate) ----
-  const visitFilter = { ...visitRangeGrand(visitRange), ...branchFilter('branch') };
-  const visitBilled = await Visit.aggregate([
-    { $match: visitFilter },
+  // ---- Clinic OP billing (visits by non-Home patients) ----
+  const clinicMatch = {
+    ...visitRangeGrand(visitRange),
+    ...branchFilter('branch'),
+    ...(chHome ? { _id: { $in: [] } } : { patient: { $nin: homeIds } }),
+  };
+  const clinicBilled = await Visit.aggregate([
+    { $match: clinicMatch },
     {
       $group: {
         _id: { $dateToString: { format: '%Y-%m-%d', date: '$visitDate' } },
@@ -515,13 +572,57 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
       },
     },
   ]);
-  const visitBilledMap = {};
-  visitBilled.forEach((r) => { visitBilledMap[r._id] = r; });
+  const clinicBilledMap = {};
+  clinicBilled.forEach((r) => { clinicBilledMap[r._id] = r; });
+
+  // ---- Home-patient OP billing (visits by Home patients) ----
+  const homeVisitMatch = {
+    ...visitRangeGrand(visitRange),
+    ...branchFilter('branch'),
+    ...(chClinic ? { _id: { $in: [] } } : { patient: { $in: homeIds } }),
+  };
+  const homeVisitBilled = await Visit.aggregate([
+    { $match: homeVisitMatch },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$visitDate' } },
+        billed: { $sum: '$charges.total' },
+        patients: { $addToSet: '$patient' },
+      },
+    },
+  ]);
+  const homeVisitBilledMap = {};
+  homeVisitBilled.forEach((r) => { homeVisitBilledMap[r._id] = r; });
+
+  // ---- Legacy HomeVisit documents (always Home) ----
+  const homeFilter2 = {
+    ...(homeRange.$gte || homeRange.$lte ? { createdAt: homeRange } : {}),
+    ...branchFilter('branch'),
+    ...(chClinic ? { _id: { $in: [] } } : {}),
+  };
+  const homeAgg = await HomeVisit.aggregate([
+    { $match: homeFilter2 },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        billed: { $sum: { $ifNull: ['$total', { $multiply: [{ $ifNull: ['$perSession', 0] }, { $ifNull: ['$sessions', 1] }] }] } },
+        advance: { $sum: { $ifNull: ['$advance', 0] } },
+        transactions: { $sum: 1 },
+        homePatients: { $addToSet: '$patientName' },
+      },
+    },
+  ]);
+  const homeMap = {};
+  homeAgg.forEach((r) => { homeMap[r._id] = r; });
 
   // ---- Payments from actual transactions (paymentDate) ----
+  const coveredTxIds = await PaymentTransaction.distinct('visitId');
+  const coveredCourseIds = await PaymentTransaction.distinct('courseId');
+
   const txFilter2 = {
     ...(txRange.$gte || txRange.$lte ? { paymentDate: txRange } : {}),
     ...branchFilter('branchId'),
+    ...(chHome ? { patientId: { $in: homeIds } } : chClinic ? { patientId: { $nin: homeIds } } : {}),
   };
   const txAgg = await PaymentTransaction.aggregate([
     { $match: txFilter2 },
@@ -530,6 +631,7 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
         _id: { $dateToString: { format: '%Y-%m-%d', date: '$paymentDate' } },
         received: { $sum: '$amount' },
         transactions: { $sum: 1 },
+        patients: { $addToSet: '$patientId' },
       },
     },
   ]);
@@ -537,11 +639,10 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
   txAgg.forEach((r) => { txMap[r._id] = r; });
 
   // ---- Legacy OP payments not covered by a transaction (visitDate) ----
-  const coveredTxIds = await PaymentTransaction.distinct('visitId');
-  const coveredCourseIds = await PaymentTransaction.distinct('courseId');
   const legacyMatch = {
     ...visitRangeGrand(visitRange),
     ...branchFilter('branch'),
+    ...(chHome ? { patient: { $in: homeIds } } : chClinic ? { patient: { $nin: homeIds } } : {}),
     'payment.advanced': { $gt: 0 },
     $or: [{ courseId: null }, { courseId: { $nin: coveredCourseIds } }],
     _id: { $nin: coveredTxIds },
@@ -559,23 +660,6 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
   const legacyMap = {};
   legacyAgg.forEach((r) => { legacyMap[r._id] = r; });
 
-  // ---- Home visits: billed + advance (createdAt) ----
-  const homeFilter2 = { ...(homeRange.$gte || homeRange.$lte ? { createdAt: homeRange } : {}), ...branchFilter('branch') };
-  const homeAgg = await HomeVisit.aggregate([
-    { $match: homeFilter2 },
-    {
-      $group: {
-        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-        billed: { $sum: { $ifNull: ['$total', { $multiply: [{ $ifNull: ['$perSession', 0] }, { $ifNull: ['$sessions', 1] }] }] } },
-        advance: { $sum: { $ifNull: ['$advance', 0] } },
-        transactions: { $sum: 1 },
-        homePatients: { $addToSet: '$patientName' },
-      },
-    },
-  ]);
-  const homeMap = {};
-  homeAgg.forEach((r) => { homeMap[r._id] = r; });
-
   // ---- Enumerate range ----
   if (wide) {
     const s = new Date(`${startStr}T00:00:00`);
@@ -590,7 +674,14 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
   }
 
   // Merge per-day
-  const allDates = new Set([...Object.keys(visitBilledMap), ...Object.keys(txMap), ...Object.keys(legacyMap), ...Object.keys(homeMap), ...daySet.keys()]);
+  const allDates = new Set([
+    ...Object.keys(clinicBilledMap),
+    ...Object.keys(homeVisitBilledMap),
+    ...Object.keys(txMap),
+    ...Object.keys(legacyMap),
+    ...Object.keys(homeMap),
+    ...daySet.keys(),
+  ]);
   allDates.forEach((d) => addDay(d));
 
   let cumBilled = 0;
@@ -598,22 +689,25 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
   const rows = [];
   [...daySet.keys()].sort().forEach((d) => {
     const r = daySet.get(d);
-    const vb = visitBilledMap[d];
+    const cb = clinicBilledMap[d];
+    const hb = homeVisitBilledMap[d];
     const tx = txMap[d];
     const leg = legacyMap[d];
     const hm = homeMap[d];
 
-    const billed = (vb?.billed || 0) + (hm?.billed || 0);
+    const billed = (cb?.billed || 0) + (hb?.billed || 0) + (hm?.billed || 0);
     const received = (tx?.received || 0) + (leg?.received || 0) + (hm?.advance || 0);
     const transactions = (tx?.transactions || 0) + (leg?.transactions || 0) + (hm?.transactions || 0);
 
     r.billed = Math.round(billed * 100) / 100;
     r.received = Math.round(received * 100) / 100;
     r.transactions = transactions;
-    (vb?.patients || []).forEach((p) => r.patients.add(p.toString()));
+    (cb?.patients || []).forEach((p) => r.patients.add(p.toString()));
+    (hb?.patients || []).forEach((p) => r.patients.add(p.toString()));
+    (tx?.patients || []).forEach((p) => r.patients.add(p.toString()));
     (hm?.homePatients || []).forEach((p) => r.patients.add(`hv:${p}`));
-    r.billedClinic = (vb?.patients || []).length;
-    r.billedHome = (hm?.transactions || 0);
+    r.billedClinic = (cb?.patients || []).length;
+    r.billedHome = (hb?.patients || []).length + (hm?.transactions || 0);
 
     cumBilled += r.billed;
     cumReceived += r.received;
@@ -623,6 +717,7 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
       billed: r.billed,
       received: r.received,
       due: Math.round(Math.max(0, cumBilled - cumReceived) * 100) / 100,
+      balance: Math.round(Math.max(0, cumReceived - cumBilled) * 100) / 100,
       patients: r.patients.size,
       clinicPatients: r.billedClinic,
       homeVisits: r.billedHome,
@@ -643,9 +738,12 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
         totalBilled: Math.round(totalBilled * 100) / 100,
         totalReceived: Math.round(totalReceived * 100) / 100,
         totalDue: last ? last.due : 0,
-        totalPatients: new Set(
-          Object.values(visitBilledMap).flatMap((r) => (r.patients || []).map((p) => p.toString()))
-        ).size,
+        totalBalance: last ? last.balance : 0,
+        totalPatients: new Set([
+          ...Object.values(clinicBilledMap).flatMap((r) => (r.patients || []).map((p) => p.toString())),
+          ...Object.values(homeVisitBilledMap).flatMap((r) => (r.patients || []).map((p) => p.toString())),
+          ...Object.values(txMap).flatMap((r) => (r.patients || []).map((p) => p.toString())),
+        ]).size,
         totalTransactions: rows.reduce((a, r) => a + r.transactions, 0),
         startDate: startStr || null,
         endDate: endStr || null,

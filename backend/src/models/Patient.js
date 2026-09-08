@@ -14,6 +14,8 @@ const patientSchema = new mongoose.Schema(
     fN: { type: String, enum: ['Follow', 'Not Follow', ''], default: '' },
     address: { type: String, trim: true, maxlength: 300 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Staff name snapshot so reports keep working if the user record is later removed.
+    createdByName: { type: String, trim: true },
   },
   { timestamps: true }
 );

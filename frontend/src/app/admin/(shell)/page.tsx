@@ -22,6 +22,7 @@ import {
 import { toast } from 'sonner';
 import { adminFetch } from '@/lib/admin-auth';
 import { inr } from '@/lib/billing';
+import type { Branch } from '@/types';
 
 interface Stat {
   totalAppointments: number;
@@ -72,6 +73,7 @@ interface DayRow {
   billed: number;
   received: number;
   due: number;
+  balance: number;
   patients: number;
   clinicPatients: number;
   homeVisits: number;
@@ -86,6 +88,7 @@ interface DayWiseData {
     totalBilled: number;
     totalReceived: number;
     totalDue: number;
+    totalBalance: number;
     totalPatients: number;
     totalTransactions: number;
     startDate: string | null;
@@ -147,8 +150,18 @@ export default function AdminDashboardPage() {
   const [customDate, setCustomDate] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [branch, setBranch] = useState('');
+  const [ch, setCh] = useState('');
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [dayData, setDayData] = useState<DayWiseData | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/site/branches')
+      .then((r) => r.json())
+      .then((d) => setBranches(d.data || []))
+      .catch(() => {});
+  }, []);
 
   const dayParams = useMemo(() => {
     if (mode === 'today') return { from: todayIso(), to: todayIso() };
@@ -169,6 +182,8 @@ export default function AdminDashboardPage() {
       const p = new URLSearchParams();
       if (dayParams.from) p.set('from', dayParams.from);
       if (dayParams.to) p.set('to', dayParams.to);
+      if (branch) p.set('branch', branch);
+      if (ch) p.set('ch', ch);
       const res = await adminFetch<{ data: DayWiseData }>(`/api/admin/analytics/revenue/day-wise?${p.toString()}`);
       setDayData(res.data);
     } catch (err) {
@@ -176,7 +191,7 @@ export default function AdminDashboardPage() {
     } finally {
       setDayLoading(false);
     }
-  }, [dayParams]);
+  }, [dayParams, branch, ch]);
 
   useEffect(() => {
     void loadDay();
@@ -206,7 +221,9 @@ export default function AdminDashboardPage() {
   const s = revenue?.summary;
 
   const modeLabel =
-    mode === 'today' ? 'Today' : mode === 'yesterday' ? 'Yesterday' : mode === 'date' ? (customDate || 'Today') : dayParams.from && dayParams.to ? `${dayParams.from} → ${dayParams.to}` : 'Date range';
+    (mode === 'today' ? 'Today' : mode === 'yesterday' ? 'Yesterday' : mode === 'date' ? (customDate || 'Today') : dayParams.from && dayParams.to ? `${dayParams.from} → ${dayParams.to}` : 'Date range') +
+    (branch ? ` · ${branches.find((b) => b._id === branch)?.name || ''}` : '') +
+    (ch ? ` · ${ch === 'home' ? 'Home' : 'Clinic'}` : '');
 
   return (
     <div className="space-y-6">
@@ -257,6 +274,17 @@ export default function AdminDashboardPage() {
               <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className={inputCls} title="To" />
             </>
           )}
+          <select value={branch} onChange={(e) => setBranch(e.target.value)} className={inputCls} title="Branch">
+            <option value="">All branches</option>
+            {branches.map((b) => (
+              <option key={b._id} value={b._id}>{b.name}</option>
+            ))}
+          </select>
+          <select value={ch} onChange={(e) => setCh(e.target.value)} className={inputCls} title="C/H">
+            <option value="">All (Clinic + Home)</option>
+            <option value="clinic">Clinic (C)</option>
+            <option value="home">Home (H)</option>
+          </select>
           <button
             onClick={() => void loadDay()}
             className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
@@ -275,10 +303,11 @@ export default function AdminDashboardPage() {
               <p className="mb-4 text-xs text-slate-400">
                 Showing <span className="font-semibold text-slate-600">{modeLabel}</span> — Billing follows the bill date; Received follows the actual payment date. Due is cumulative.
               </p>
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
                 <RevStat label="Total Billed" value={inr(dayData?.summary.totalBilled ?? 0)} tone="sky" />
                 <RevStat label="Received" value={inr(dayData?.summary.totalReceived ?? 0)} tone="emerald" />
                 <RevStat label="Due" value={inr(dayData?.summary.totalDue ?? 0)} tone="amber" />
+                <RevStat label="Balance" value={inr(dayData?.summary.totalBalance ?? 0)} tone="sky" />
                 <RevStat label="Patients" value={(dayData?.summary.totalPatients ?? 0).toLocaleString()} tone="sky" />
                 <RevStat label="Transactions" value={(dayData?.summary.totalTransactions ?? 0).toLocaleString()} tone="emerald" />
               </div>
@@ -292,6 +321,7 @@ export default function AdminDashboardPage() {
                         <th className="px-3 py-2 text-right font-semibold">Billed</th>
                         <th className="px-3 py-2 text-right font-semibold">Received</th>
                         <th className="px-3 py-2 text-right font-semibold">Due</th>
+                        <th className="px-3 py-2 text-right font-semibold">Balance</th>
                         <th className="px-3 py-2 text-right font-semibold">Patients</th>
                         <th className="px-3 py-2 text-right font-semibold">Clinic</th>
                         <th className="px-3 py-2 text-right font-semibold">Home Visits</th>
@@ -305,6 +335,7 @@ export default function AdminDashboardPage() {
                           <td className="px-3 py-2 text-right text-slate-800">{inr(r.billed)}</td>
                           <td className="px-3 py-2 text-right font-medium text-emerald-600">{inr(r.received)}</td>
                           <td className="px-3 py-2 text-right font-semibold text-amber-600">{inr(r.due)}</td>
+                          <td className="px-3 py-2 text-right font-medium text-slate-600">{inr(r.balance)}</td>
                           <td className="px-3 py-2 text-right text-slate-700">{r.patients}</td>
                           <td className="px-3 py-2 text-right text-slate-500">{r.clinicPatients}</td>
                           <td className="px-3 py-2 text-right text-slate-500">{r.homeVisits}</td>

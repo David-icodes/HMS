@@ -5,45 +5,45 @@ import { CalendarDays, Download, Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import ExcelJS from 'exceljs';
 import { adminFetch } from '@/lib/admin-auth';
+import { staffFetch } from '@/lib/staff-auth';
 import type { Branch } from '@/types';
 
 interface RegisterRow {
   date: string;
-  branch: string;
-  cH: string;
-  patientName: string;
-  uhid: string;
-  opNo: string;
-  serialNo: string;
-  department: string;
-  doctor: string;
-  visitType: string;
-  courseDay: string;
-  courseProgress: string;
-  billed: number;
-  paid: number;
-  due: number;
-  paymentMethod: string;
-  createdBy: string;
+  branchId: string | null;
+  branchName: string;
+  clinic: number;
+  home: number;
+  total: number;
 }
 
 interface RegisterRes {
   data: RegisterRow[];
-  totals: { billed: number; paid: number; due: number };
-  count: number;
+  totals: { clinic: number; home: number; total: number };
 }
+
+const CH_OPTIONS = ['All', 'Clinic', 'Home'];
 
 const inputCls = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
 
-export default function DailyRegister() {
+export default function DailyRegister({ mode = 'admin' }: { mode?: 'admin' | 'staff' }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [branch, setBranch] = useState('');
+  const [ch, setCh] = useState('All');
   const [branches, setBranches] = useState<Branch[]>([]);
   const [rows, setRows] = useState<RegisterRow[]>([]);
-  const [totals, setTotals] = useState<{ billed: number; paid: number; due: number }>({ billed: 0, paid: 0, due: 0 });
+  const [totals, setTotals] = useState<{ clinic: number; home: number; total: number }>({ clinic: 0, home: 0, total: 0 });
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  const base = mode === 'staff' ? '/api/staff/daily-register' : '/api/admin/daily-register';
+
+  const branchNameMap = useCallback(() => {
+    const map: Record<string, string> = {};
+    branches.forEach((b) => (map[b._id] = b.name));
+    return map;
+  }, [branches]);
 
   useEffect(() => {
     fetch('/api/site/branches')
@@ -59,20 +59,26 @@ export default function DailyRegister() {
       if (from) params.set('from', from);
       if (to) params.set('to', to);
       if (branch) params.set('branch', branch);
-      const res = await adminFetch<{ data: RegisterRes }>(`/api/admin/daily-register/detail?${params}`);
-      const payload = res.data || { data: [], totals: { billed: 0, paid: 0, due: 0 }, count: 0 };
-      setRows(payload.data || []);
-      setTotals(payload.totals || { billed: 0, paid: 0, due: 0 });
+      if (ch !== 'All') params.set('ch', ch.toLowerCase());
+      const res =
+        mode === 'staff'
+          ? await staffFetch<{ data: RegisterRes }>(`${base}?${params}`)
+          : await adminFetch<{ data: RegisterRes }>(`${base}?${params}`);
+      const payload = res.data || { data: [], totals: { clinic: 0, home: 0, total: 0 } };
+      setRows(Array.isArray(payload.data) ? payload.data : []);
+      setTotals(payload.totals || { clinic: 0, home: 0, total: 0 });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load daily register');
     } finally {
       setLoading(false);
     }
-  }, [from, to, branch]);
+  }, [mode, base, from, to, branch, ch]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const branchNames = branchNameMap();
 
   const handleExport = async () => {
     setExporting(true);
@@ -81,53 +87,23 @@ export default function DailyRegister() {
       workbook.created = new Date();
       workbook.creator = 'Urmila Raj Hospital';
       const sheet = workbook.addWorksheet('Daily Register');
-      const header = [
-        'Date',
-        'Branch',
-        'C/H',
-        'Patient Name',
-        'UHID',
-        'OP Number',
-        'Home S.No',
-        'Department',
-        'Doctor',
-        'Visit Type',
-        'Course Day',
-        'Course Progress',
-        'Total Billing',
-        'Paid',
-        'Due',
-        'Payment Method',
-        'Created By',
-      ];
-      sheet.columns = header.map((h) => ({ header: h, key: h.replace(/\s|\.|\//g, '_'), width: 18 }));
+      const header = ['Date', 'Branch', 'Clinic', 'Home', 'Total'];
+      sheet.columns = header.map((h) => ({ header: h, key: h.toLowerCase(), width: 18 }));
       sheet.getRow(1).font = { bold: true };
       rows.forEach((r) => {
         sheet.addRow({
           Date: r.date,
-          Branch: r.branch,
-          C_H: r.cH,
-          Patient_Name: r.patientName,
-          UHID: r.uhid,
-          OP_Number: r.opNo,
-          Home_S_No: r.serialNo,
-          Department: r.department,
-          Doctor: r.doctor,
-          Visit_Type: r.visitType,
-          Course_Day: r.courseDay,
-          Course_Progress: r.courseProgress,
-          Total_Billing: r.billed,
-          Paid: r.paid,
-          Due: r.due,
-          Payment_Method: r.paymentMethod,
-          Created_By: r.createdBy,
+          Branch: r.branchName || (r.branchId && branchNames[r.branchId]) || 'Unassigned',
+          Clinic: r.clinic,
+          Home: r.home,
+          Total: r.total,
         });
       });
       sheet.addRow({
         Branch: 'TOTAL',
-        Total_Billing: totals.billed,
-        Paid: totals.paid,
-        Due: totals.due,
+        Clinic: totals.clinic,
+        Home: totals.home,
+        Total: totals.total,
       });
       const buf = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buf], {
@@ -141,7 +117,7 @@ export default function DailyRegister() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success(`Exported ${rows.length} entries`);
+      toast.success(`Exported ${rows.length} rows`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Export failed');
     } finally {
@@ -154,15 +130,20 @@ export default function DailyRegister() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="flex items-center gap-2 text-sm text-slate-500">
           <CalendarDays className="h-4 w-4 text-sky-600" />
-          Daily Register — detailed entries (Clinic + Home), Branch shown on every row
+          Daily Register — Clinic + Home visits per date and branch
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} title="From" />
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} title="To" />
-          <select value={branch} onChange={(e) => setBranch(e.target.value)} className={inputCls}>
+          <select value={branch} onChange={(e) => setBranch(e.target.value)} className={inputCls} title="Branch">
             <option value="">All branches</option>
             {branches.map((b) => (
               <option key={b._id} value={b._id}>{b.name}</option>
+            ))}
+          </select>
+          <select value={ch} onChange={(e) => setCh(e.target.value)} className={inputCls} title="C/H">
+            {CH_OPTIONS.map((o) => (
+              <option key={o} value={o}>{o}</option>
             ))}
           </select>
           <button
@@ -184,78 +165,49 @@ export default function DailyRegister() {
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1500px] text-left text-xs">
+          <table className="w-full min-w-[600px] text-left text-xs">
             <thead className="bg-slate-50">
               <tr className="text-[10px] uppercase tracking-wider text-slate-500">
                 <th className="px-3 py-2.5 font-semibold">Date</th>
                 <th className="px-3 py-2.5 font-semibold">Branch</th>
-                <th className="px-3 py-2.5 font-semibold">C/H</th>
-                <th className="px-3 py-2.5 font-semibold">Patient Name</th>
-                <th className="px-3 py-2.5 font-semibold">UHID</th>
-                <th className="px-3 py-2.5 font-semibold">OP No / Home S.No</th>
-                <th className="px-3 py-2.5 font-semibold">Department</th>
-                <th className="px-3 py-2.5 font-semibold">Doctor</th>
-                <th className="px-3 py-2.5 font-semibold">Visit Type</th>
-                <th className="px-3 py-2.5 font-semibold">Course Day</th>
-                <th className="px-3 py-2.5 font-semibold">Progress</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Billing</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Paid</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Due</th>
-                <th className="px-3 py-2.5 font-semibold">Method</th>
-                <th className="px-3 py-2.5 font-semibold">Created By</th>
+                <th className="px-3 py-2.5 text-right font-semibold">Clinic</th>
+                <th className="px-3 py-2.5 text-right font-semibold">Home</th>
+                <th className="px-3 py-2.5 text-right font-semibold">Total</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={16} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin text-sky-600" />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
                     No register entries. Adjust date/branch filters and click Apply.
                   </td>
                 </tr>
               ) : (
-                rows.map((r, i) => (
-                  <tr key={`${r.date}-${r.patientName}-${i}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
-                    <td className="px-3 py-2.5 text-slate-800">{formatDate(r.date)}</td>
-                    <td className="px-3 py-2.5">
-                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
-                        {r.branch}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${r.cH === 'Home' ? 'bg-purple-50 text-purple-700' : 'bg-teal-50 text-teal-700'}`}>
-                        {r.cH}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 font-medium text-slate-800">{r.patientName || '—'}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.uhid || '—'}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.opNo || r.serialNo || '—'}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.department || '—'}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.doctor || '—'}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.visitType}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.courseDay || '—'}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.courseProgress || '—'}</td>
-                    <td className="px-3 py-2.5 text-right font-semibold text-slate-800">{inr(r.billed)}</td>
-                    <td className="px-3 py-2.5 text-right font-semibold text-teal-700">{inr(r.paid)}</td>
-                    <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(r.due)}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.paymentMethod || '—'}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{r.createdBy || '—'}</td>
-                  </tr>
-                ))
+                (() => {
+                  const grouped: { date: string; rows: RegisterRow[] }[] = [];
+                  rows.forEach((r) => {
+                    const last = grouped[grouped.length - 1];
+                    if (last && last.date === r.date) last.rows.push(r);
+                    else grouped.push({ date: r.date, rows: [r] });
+                  });
+                  return grouped.map((g) => (
+                    <FragmentGroup key={g.date} group={g} branchNames={branchNames} />
+                  ));
+                })()
               )}
             </tbody>
             <tfoot className="bg-slate-50 font-semibold">
               <tr className="border-t border-slate-200">
-                <td className="px-3 py-3 text-slate-900" colSpan={11}></td>
-                <td className="px-3 py-3 text-right text-slate-900">{inr(totals.billed)}</td>
-                <td className="px-3 py-3 text-right text-teal-700">{inr(totals.paid)}</td>
-                <td className="px-3 py-3 text-right text-amber-600">{inr(totals.due)}</td>
-                <td colSpan={2}></td>
+                <td className="px-3 py-3 text-slate-900" colSpan={2}></td>
+                <td className="px-3 py-3 text-right text-slate-900">{totals.clinic}</td>
+                <td className="px-3 py-3 text-right text-slate-900">{totals.home}</td>
+                <td className="px-3 py-3 text-right text-slate-900">{totals.total}</td>
               </tr>
             </tfoot>
           </table>
@@ -263,11 +215,39 @@ export default function DailyRegister() {
       </div>
 
       <p className="text-xs text-slate-400">
-        {rows.length} entry{rows.length === 1 ? '' : 'ies'} — totals: <span className="font-semibold">Billed {inr(totals.billed)}</span>,{' '}
-        <span className="font-semibold text-teal-700">Paid {inr(totals.paid)}</span>,{' '}
-        <span className="font-semibold text-amber-600">Due {inr(totals.due)}</span>
+        {rows.length} record{rows.length === 1 ? '' : 's'} — totals: <span className="font-semibold">Clinic {totals.clinic}</span>,{' '}
+        <span className="font-semibold">Home {totals.home}</span>,{' '}
+        <span className="font-semibold">Total {totals.total}</span>
       </p>
     </div>
+  );
+}
+
+function FragmentGroup({ group, branchNames }: { group: { date: string; rows: RegisterRow[] }; branchNames: Record<string, string> }) {
+  const dateTotal = group.rows.reduce((acc, r) => ({ clinic: acc.clinic + r.clinic, home: acc.home + r.home, total: acc.total + r.total }), { clinic: 0, home: 0, total: 0 });
+  return (
+    <>
+      {group.rows.map((r) => (
+        <tr key={`${r.date}-${r.branchId || 'none'}`} className="border-b border-slate-100 hover:bg-slate-50/60">
+          <td className="px-3 py-2.5 text-slate-800">{formatDate(r.date)}</td>
+          <td className="px-3 py-2.5">
+            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+              {r.branchName || (r.branchId && branchNames[r.branchId]) || 'Unassigned'}
+            </span>
+          </td>
+          <td className="px-3 py-2.5 text-right font-semibold text-slate-800">{r.clinic}</td>
+          <td className="px-3 py-2.5 text-right font-semibold text-purple-700">{r.home}</td>
+          <td className="px-3 py-2.5 text-right font-semibold text-slate-800">{r.total}</td>
+        </tr>
+      ))}
+      <tr className="border-b border-slate-200 bg-slate-50/70">
+        <td className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Subtotal</td>
+        <td className="px-3 py-2 text-right text-[10px] font-semibold text-slate-500">{group.date}</td>
+        <td className="px-3 py-2 text-right text-[10px] font-semibold text-slate-600">{dateTotal.clinic}</td>
+        <td className="px-3 py-2 text-right text-[10px] font-semibold text-slate-600">{dateTotal.home}</td>
+        <td className="px-3 py-2 text-right text-[10px] font-semibold text-slate-700">{dateTotal.total}</td>
+      </tr>
+    </>
   );
 }
 
@@ -275,8 +255,4 @@ function formatDate(s: string): string {
   const d = new Date(`${s}T00:00:00`);
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function inr(n: number): string {
-  return `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
 }

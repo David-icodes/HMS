@@ -54,6 +54,8 @@ const {
   dailyRegisterDetail,
   staffActivity,
   staffActivityDetail,
+  staffAnalytics,
+  staffAnalyticsDetail,
 } = require('../controllers/admin/reportController');
 const {
   markIn,
@@ -108,6 +110,8 @@ router.get('/daily-register', authorize('superAdmin', 'admin'), dailyRegister);
 router.get('/daily-register/detail', authorize('superAdmin', 'admin'), dailyRegisterDetail);
 router.get('/staff-activity', authorize('superAdmin', 'admin'), staffActivity);
 router.get('/staff-activity/detail', authorize('superAdmin', 'admin'), staffActivityDetail);
+router.get('/staff-analytics', authorize('superAdmin', 'admin'), staffAnalytics);
+router.get('/staff-analytics/detail', authorize('superAdmin', 'admin'), staffAnalyticsDetail);
 
 // Staff attendance (admin views)
 router.get('/attendance', authorize('superAdmin', 'admin'), listAttendance);

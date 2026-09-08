@@ -6,9 +6,10 @@ import { toast } from 'sonner';
 import { staffFetch } from '@/lib/staff-auth';
 import { useStaffReference } from '@/hooks/use-staff-reference';
 import { computeTotals, computePayment, inr, toNum } from '@/lib/billing';
-import type { Course, Patient, Visit } from '@/types';
+import type { Course, Patient, User, Visit } from '@/types';
 
 const GENDERS = ['Male', 'Female', 'Other'];
+const CH_OPTIONS = ['Clinic', 'Home'];
 const VISIT_TYPES = ['New OP', 'Follow-up'];
 const FN_OPTIONS = ['Follow', 'Not Follow'];
 
@@ -39,7 +40,7 @@ export default function RegistrationForm({
   const [selected, setSelected] = useState<ExistingPatient | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [p, setP] = useState({ name: '', mobile: '', age: '', gender: 'Male', fN: '', address: '' });
+  const [p, setP] = useState({ name: '', mobile: '', age: '', gender: 'Male', cH: 'Clinic', fN: '', address: '' });
   const [v, setV] = useState({
     visitDate: new Date().toISOString().split('T')[0],
     visitType: 'New OP',
@@ -50,21 +51,47 @@ export default function RegistrationForm({
     concern: '',
     diagnosis: '',
     treatment: '',
-    noOfDays: '0',
     notes: '',
   });
   const [charges, setCharges] = useState({ opConsultation: '', pharmacy: '', lab: '', otherCharges: '', discount: '', tax: '' });
-  const [advanced, setAdvanced] = useState('');
+  const [previousAdvance, setPreviousAdvance] = useState('');
+  const [amountPaid, setAmountPaid] = useState('');
   const [methodId, setMethodId] = useState('');
   const [signature, setSignature] = useState('');
 
+  const [staffList, setStaffList] = useState<User[]>([]);
+  const [staffQuery, setStaffQuery] = useState('');
+  const [staffId, setStaffId] = useState('');
+
   // Course mode: package treatment billed ONCE, many follow-up visits (₹0 unless extra).
   const [courseMode, setCourseMode] = useState(false);
-  const [course, setCourse] = useState({ totalDays: '10', courseAmount: '', firstPayment: '', methodId: '' });
+  const [course, setCourse] = useState({ totalDays: '10', courseAmount: '' });
   const [activeCourse, setActiveCourse] = useState<Course | null>(null);
   const [activeVisits, setActiveVisits] = useState<Visit[]>([]);
   const [courseLoading, setCourseLoading] = useState(false);
   const [additionalCharge, setAdditionalCharge] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await staffFetch<{ data: User[] }>('/api/staff/staffs');
+        setStaffList(res.data ?? []);
+      } catch {
+        setStaffList([]);
+      }
+    })();
+  }, []);
+
+  const staffMatches = useMemo(() => {
+    const q = staffQuery.trim().toLowerCase();
+    if (!q) return staffList.slice(0, 30);
+    return staffList.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        (s.mobileNumber || '').toLowerCase().includes(q) ||
+        (s.username || '').toLowerCase().includes(q),
+    ).slice(0, 30);
+  }, [staffList, staffQuery]);
 
   const totals = useMemo(
     () =>
@@ -78,13 +105,10 @@ export default function RegistrationForm({
       }),
     [charges],
   );
-  const pay = useMemo(() => computePayment(totals.total, toNum(advanced)), [totals.total, advanced]);
+  const applied = toNum(previousAdvance) + toNum(amountPaid);
+  const pay = useMemo(() => computePayment(totals.total, applied), [totals.total, applied]);
   const selectedMethod = paymentMethods.find((m) => m._id === methodId);
-  const courseMethod = paymentMethods.find((m) => m._id === course.methodId);
-  const coursePay = useMemo(
-    () => computePayment(toNum(course.courseAmount), toNum(course.firstPayment)),
-    [course.firstPayment, course.courseAmount],
-  );
+  const coursePay = useMemo(() => computePayment(toNum(course.courseAmount), applied), [course.courseAmount, applied]);
 
   const doctors = useMemo(() => doctorsForDepartment(v.department), [doctorsForDepartment, v.department]);
 
@@ -125,6 +149,7 @@ export default function RegistrationForm({
       mobile: pat.mobile,
       age: pat.age != null ? String(pat.age) : '',
       gender: pat.gender || 'Male',
+      cH: pat.cH || 'Clinic',
       fN: pat.fN || '',
       address: pat.address || '',
     });
@@ -137,7 +162,7 @@ export default function RegistrationForm({
     setSelected(null);
     setSearch('');
     setResults([]);
-    setP({ name: '', mobile: '', age: '', gender: 'Male', fN: '', address: '' });
+    setP({ name: '', mobile: '', age: '', gender: 'Male', cH: 'Clinic', fN: '', address: '' });
     setActiveCourse(null);
     setActiveVisits([]);
     setAdditionalCharge('');
@@ -184,6 +209,7 @@ export default function RegistrationForm({
           notes: v.notes.trim() || undefined,
           signature: signature.trim() || undefined,
           additionalCharge: additionalCharge ? Number(additionalCharge) : 0,
+          staff: staffId || undefined,
         },
       });
       toast.success(`Day ${res.data.visit.dayNumber ?? ''} follow-up added`);
@@ -218,9 +244,11 @@ export default function RegistrationForm({
         startDate: v.visitDate,
         totalDays: Number(course.totalDays),
         courseAmount: amt,
-        firstPayment: toNum(course.firstPayment),
-        paymentMethod: course.methodId || undefined,
+        previousAdvance: toNum(previousAdvance),
+        firstPayment: toNum(amountPaid),
+        paymentMethod: methodId || undefined,
         signature: signature.trim() || undefined,
+        staff: staffId || undefined,
       };
       if (selected) {
         body.patientId = selected._id;
@@ -229,6 +257,7 @@ export default function RegistrationForm({
         body.mobile = p.mobile.trim();
         body.age = p.age ? Number(p.age) : undefined;
         body.gender = p.gender;
+        body.cH = p.cH;
         body.fN = p.fN || undefined;
         body.address = p.address.trim() || undefined;
       }
@@ -238,7 +267,9 @@ export default function RegistrationForm({
         courseData.patient && typeof courseData.patient === 'object' ? courseData.patient._id : selected?._id || '';
       toast.success(`Course ${courseData.courseNo} created (billed ${inr(amt)})`);
       setCourseMode(false);
-      setCourse({ totalDays: '10', courseAmount: '', firstPayment: '', methodId: '' });
+      setCourse({ totalDays: '10', courseAmount: '' });
+      setPreviousAdvance('');
+      setAmountPaid('');
       setSignature('');
       onRegistered({ patient: { _id: patId, uhid: '', name: p.name.trim(), mobile: p.mobile.trim() } as Patient, visit: res.data.visit });
     } catch (err) {
@@ -270,6 +301,7 @@ export default function RegistrationForm({
           mobile: p.mobile.trim(),
           age: p.age ? Number(p.age) : undefined,
           gender: p.gender,
+          cH: p.cH,
           fN: p.fN || undefined,
           address: p.address.trim() || undefined,
         },
@@ -283,7 +315,7 @@ export default function RegistrationForm({
           concern: v.concern.trim() || undefined,
           diagnosis: v.diagnosis.trim() || undefined,
           treatment: v.treatment.trim() || undefined,
-          noOfDays: v.noOfDays ? Number(v.noOfDays) : 0,
+          cH: p.cH,
           notes: v.notes.trim() || undefined,
         },
         charges: {
@@ -295,7 +327,8 @@ export default function RegistrationForm({
           tax: charges.tax,
         },
         payment: {
-          advanced: advanced,
+          previousAdvance: previousAdvance || '0',
+          amountPaid: amountPaid || '0',
           method: methodId || undefined,
           methodName: selectedMethod?.name,
         },
@@ -435,6 +468,13 @@ export default function RegistrationForm({
               ))}
             </select>
           </Field>
+          <Field label="C/H">
+            <select value={p.cH} onChange={(e) => setP({ ...p, cH: e.target.value })} className={inputCls}>
+              {CH_OPTIONS.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </Field>
           <Field label="F/N">
             <select value={p.fN} onChange={(e) => setP({ ...p, fN: e.target.value })} className={inputCls}>
               <option value="">— Select —</option>
@@ -501,11 +541,6 @@ export default function RegistrationForm({
               className={inputCls}
             />
           </Field>
-          {!courseMode && (
-            <Field label="No. of Days">
-              <input value={v.noOfDays} onChange={(e) => setV({ ...v, noOfDays: e.target.value })} type="number" min={0} className={inputCls} />
-            </Field>
-          )}
           <Field label="Concern / Symptoms" wide>
             <textarea value={v.concern} onChange={(e) => setV({ ...v, concern: e.target.value })} rows={2} className={inputCls} />
           </Field>
@@ -542,6 +577,31 @@ export default function RegistrationForm({
               />
             </Field>
           </div>
+          {courseMode && (
+            <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-3">
+              <Field label="Staff (course attendant)" hint="Pick from list">
+                <input
+                  list="staff-search-list"
+                  value={staffQuery}
+                  onChange={(e) => {
+                    setStaffQuery(e.target.value);
+                    setStaffId('');
+                  }}
+                  onBlur={() => {
+                    const match = staffMatches.find((s) => s.name === staffQuery.trim());
+                    if (match) setStaffId(match._id);
+                  }}
+                  placeholder="Type to search staff…"
+                  className={inputCls}
+                />
+                <datalist id="staff-search-list">
+                  {staffMatches.map((s) => (
+                    <option key={s._id} value={`${s.name} · ${s.mobileNumber || ''}`}>{s.role}</option>
+                  ))}
+                </datalist>
+              </Field>
+            </div>
+          )}
         </section>
       ) : (
         <>
@@ -563,8 +623,25 @@ export default function RegistrationForm({
             </div>
 
             <div className="mt-4 grid gap-4 sm:grid-cols-3">
-              <Field label="Advance / Paid (₹)">
-                <input value={advanced} onChange={(e) => setAdvanced(e.target.value)} type="number" min={0} className={inputCls} />
+              <Field label="Previous Advance (₹)">
+                <input
+                  value={previousAdvance}
+                  onChange={(e) => setPreviousAdvance(e.target.value)}
+                  type="number"
+                  min={0}
+                  className={inputCls}
+                  placeholder="0"
+                />
+              </Field>
+              <Field label="Amount Paid (₹)">
+                <input
+                  value={amountPaid}
+                  onChange={(e) => setAmountPaid(e.target.value)}
+                  type="number"
+                  min={0}
+                  className={inputCls}
+                  placeholder="0"
+                />
               </Field>
               <Field label="Payment Method">
                 <select value={methodId} onChange={(e) => setMethodId(e.target.value)} className={inputCls}>
@@ -579,6 +656,10 @@ export default function RegistrationForm({
                   {pay.status}
                 </div>
               </Field>
+              <div className="rounded-xl bg-white p-3 shadow-sm">
+                <p className="text-xs text-slate-400">Applied to this visit</p>
+                <p className="text-lg font-bold text-teal-700">{inr(applied)}</p>
+              </div>
             </div>
           </section>
 
@@ -620,26 +701,30 @@ export default function RegistrationForm({
                       className={inputCls}
                     />
                   </Field>
-                  <Field label="First Payment / Advance (₹)">
+                  <Field label="Staff (course attendant)" hint="Pick from list">
                     <input
-                      value={course.firstPayment}
-                      onChange={(e) => setCourse({ ...course, firstPayment: e.target.value })}
-                      type="number"
-                      min={0}
+                      list="staff-search-list"
+                      value={staffQuery}
+                      onChange={(e) => {
+                        setStaffQuery(e.target.value);
+                        setStaffId('');
+                      }}
+                      onBlur={() => {
+                        const match = staffMatches.find((s) => s.name === staffQuery.trim());
+                        if (match) setStaffId(match._id);
+                      }}
+                      placeholder="Type to search staff…"
                       className={inputCls}
                     />
-                  </Field>
-                  <Field label="Payment Method">
-                    <select value={course.methodId} onChange={(e) => setCourse({ ...course, methodId: e.target.value })} className={inputCls}>
-                      <option value="">— Select —</option>
-                      {paymentMethods.map((m) => (
-                        <option key={m._id} value={m._id}>{m.name}</option>
+                    <datalist id="staff-search-list">
+                      {staffMatches.map((s) => (
+                        <option key={s._id} value={`${s.name} · ${s.mobileNumber || ''}`}>{s.role}</option>
                       ))}
-                    </select>
+                    </datalist>
                   </Field>
                   <div className="rounded-xl bg-white p-3 shadow-sm">
                     <p className="text-xs text-slate-400">Course billing preview</p>
-                    <p className="text-lg font-bold text-teal-700">Billed {inr(toNum(course.courseAmount))} · Paid {inr(toNum(course.firstPayment))} · Due {inr(coursePay.due)}</p>
+                    <p className="text-lg font-bold text-teal-700">Billed {inr(toNum(course.courseAmount))} · Paid {inr(applied)} · Due {inr(coursePay.due)}</p>
                   </div>
                 </div>
               )}
@@ -699,8 +784,6 @@ function Field({ label, children, wide, hint }: { label: string; children: React
 }
 
 function MoneyField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  const inputCls =
-    'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20';
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-slate-500">{label} (₹)</label>

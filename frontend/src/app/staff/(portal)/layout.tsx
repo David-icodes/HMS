@@ -3,16 +3,15 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Loader2, LogOut, LayoutDashboard, Users, Home, Repeat } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Users, Repeat, ClipboardList } from 'lucide-react';
 import { useStaffAuth, fetchStaffMe, STAFF_ROLES } from '@/lib/staff-auth';
-import AttendanceToggle from '@/components/staff/AttendanceToggle';
 
 function titleFor(pathname: string) {
   if (pathname === '/staff') return 'Dashboard';
   if (pathname.includes('/invoice')) return 'Invoice';
   if (pathname === '/staff/patients') return 'Patients';
   if (pathname.startsWith('/staff/follow-up')) return 'Follow-up';
-  if (pathname.startsWith('/staff/home-visits')) return 'Home Visits';
+  if (pathname.startsWith('/staff/daily-register')) return 'Daily Register';
   return 'Staff Portal';
 }
 
@@ -76,7 +75,7 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
           <nav className="flex items-center gap-1 text-sm font-medium">
             <Link
               href="/staff"
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors ${isActive('/staff') && !pathname.startsWith('/staff/home-visits') && !pathname.startsWith('/staff/patients') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors ${pathname === '/staff' ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <LayoutDashboard className="h-4 w-4" /> Dashboard
             </Link>
@@ -93,14 +92,13 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
               <Repeat className="h-4 w-4" /> Follow-up
             </Link>
             <Link
-              href="/staff/home-visits"
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/home-visits') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
+              href="/staff/daily-register"
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isActive('/staff/daily-register') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
             >
-              <Home className="h-4 w-4" /> Home Visits
+              <ClipboardList className="h-4 w-4" /> Daily Register
             </Link>
           </nav>
           <div className="flex items-center gap-3">
-            <AttendanceToggle />
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-slate-800">{user.name}</p>
               <p className="text-[11px] capitalize text-slate-400">{user.role.replace(/([A-Z])/g, ' $1')}</p>

@@ -36,6 +36,16 @@ const parseRange = (from, to) => {
   return range;
 };
 
+// C/H split helpers. Patients marked Home (free-text, case/space tolerant) are Home;
+// everything else (including legacy patients with no cH) counts as Clinic.
+const HOME_CH_RE = /^\s*home\s*$/i;
+const isHomeCh = (v) => HOME_CH_RE.test(v || '');
+
+const homePatientIds = async () => {
+  const ids = await Patient.distinct('_id', { cH: HOME_CH_RE });
+  return ids.map(String);
+};
+
 const sanitizeCharges = (charges) => billing.normalizeCharges(charges || {});
 
 const resolvePaymentMethod = async (method) => {
@@ -118,7 +128,7 @@ const createPatient = asyncHandler(async (req, res) => {
   let patient = await Patient.findOne({ mobile });
   let isNew = false;
   if (patient) {
-    // keep existing patient (do not duplicate)
+    // keep existing patient (do not duplicate); never overwrite an existing cH
     const patch = {};
     if (address && !patient.address) patch.address = address;
     if (cH && !patient.cH) patch.cH = cH;
@@ -133,6 +143,7 @@ const createPatient = asyncHandler(async (req, res) => {
       fN: fN || '',
       address: address || undefined,
       createdBy: req.user._id,
+      createdByName: req.user.name,
     });
     isNew = true;
   }
@@ -149,7 +160,7 @@ const createPatient = asyncHandler(async (req, res) => {
     req.body.payment;
 
   if (hasVisit) {
-    visit = await createVisitForPatient(patient, req.body, req.user._id);
+    visit = await createVisitForPatient(patient, req.body, req.user._id, req.user.name);
     if (visit.invoiceNumber) invoice = visit.invoiceNumber;
   }
 
@@ -159,7 +170,7 @@ const createPatient = asyncHandler(async (req, res) => {
 });
 
 // ---------- Add a new visit to an existing patient ----------
-const createVisitForPatient = async (patient, body, userId) => {
+const createVisitForPatient = async (patient, body, userId, userName) => {
   const visitType = body.visit?.visitType || 'New OP';
   // Required fields for every NEW OP record (spec). Follow-ups inherit from their
   // course/previous visit and only use values provided. Historical records are untouched.
@@ -170,10 +181,14 @@ const createVisitForPatient = async (patient, body, userId) => {
     if (!body.signature?.trim()) throw new ApiError(400, 'Doctor / Staff signature is required.');
   }
   const charges = sanitizeCharges(body.charges || {});
-  const { advanced, status } = billing.computePayment(charges.total, body.payment?.advanced, body.payment?.methodName);
+  const previousAdvance = Math.max(0, billing.round2(billing.toNum(body.payment?.previousAdvance)));
+  const amountPaid =
+    body.payment?.amountPaid !== undefined
+      ? Math.max(0, billing.round2(billing.toNum(body.payment.amountPaid)))
+      : Math.max(0, billing.round2(billing.toNum(body.payment?.advanced)));
+  const applied = billing.round2(previousAdvance + amountPaid);
   const method = await resolvePaymentMethod(body.payment?.method);
 
-  const mergedCharges = { ...charges };
   const visit = await Visit.create({
     patient: patient._id,
     uhid: patient.uhid,
@@ -188,15 +203,17 @@ const createVisitForPatient = async (patient, body, userId) => {
     treatment: body.visit?.treatment || undefined,
     noOfDays: body.visit?.noOfDays || 0,
     notes: body.visit?.notes || undefined,
-    charges: mergedCharges,
+    charges: charges,
     payment: {
-      advanced,
+      previousAdvance,
+      advanced: applied,
       method: method.id,
       methodName: method.name,
-      due: billing.computePayment(charges.total, advanced).due,
-      status,
+      due: billing.computePayment(charges.total, applied).due,
+      status: billing.computePayment(charges.total, applied).status,
     },
     createdBy: userId,
+    createdByName: userName,
     signature: body.signature || undefined,
   });
   return visit;
@@ -205,7 +222,7 @@ const createVisitForPatient = async (patient, body, userId) => {
 const addVisit = asyncHandler(async (req, res) => {
   const patient = await Patient.findById(req.params.id);
   if (!patient) throw new ApiError(404, 'Patient not found');
-  const visit = await createVisitForPatient(patient, req.body, req.user._id);
+  const visit = await createVisitForPatient(patient, req.body, req.user._id, req.user.name);
   await logActivity({ req, action: 'create_visit', entity: 'visit', entityId: visit._id, details: { uhid: patient.uhid, op: visit.opNumber } });
   const full = await Visit.findById(visit._id).populate(VISIT_POPULATE);
   res.status(201).json(new ApiResponse(201, { visit: full }));
@@ -213,7 +230,7 @@ const addVisit = asyncHandler(async (req, res) => {
 
 // ---------- List visits (OP list) ----------
 const listVisits = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 20, search, from, to, branch, department, doctor, status, visitType, sort = '-createdAt' } = req.query;
+  const { page = 1, limit = 20, search, from, to, branch, department, doctor, status, visitType, ch, sort = '-createdAt' } = req.query;
   const query = {};
 
   if (search) {
@@ -230,6 +247,12 @@ const listVisits = asyncHandler(async (req, res) => {
   if (doctor) query.doctor = doctor;
   if (status) query['payment.status'] = status;
   if (visitType) query.visitType = visitType;
+  if (ch) {
+    const term = String(ch).trim().toLowerCase();
+    const homeIds = await homePatientIds();
+    if (term === 'home') query.patient = { $in: homeIds };
+    else if (term === 'clinic') query.patient = { $nin: homeIds };
+  }
 
   const total = await Visit.countDocuments(query);
   const sortKey = sort.replace(/^-/, '');
@@ -273,10 +296,12 @@ const updateVisit = asyncHandler(async (req, res) => {
   if (req.body.charges || req.body.payment) {
     const charges = sanitizeCharges(req.body.charges || visit.charges);
     const advanced = req.body.payment?.advanced !== undefined ? Number(req.body.payment.advanced) : visit.payment.advanced;
+    const previousAdvance = req.body.payment?.previousAdvance !== undefined ? Number(req.body.payment.previousAdvance) : visit.payment.previousAdvance || 0;
     const method = await resolvePaymentMethod(req.body.payment?.method ?? visit.payment.method);
     const pay = billing.computePayment(charges.total, advanced, method.name);
     visit.charges = charges;
     visit.payment = {
+      previousAdvance,
       advanced: pay.advanced,
       method: method.id,
       methodName: method.name,
@@ -330,10 +355,12 @@ const adminUpdateVisit = asyncHandler(async (req, res) => {
   if (req.body.charges || req.body.payment) {
     const charges = sanitizeCharges(req.body.charges || visit.charges);
     const advanced = req.body.payment?.advanced !== undefined ? Number(req.body.payment.advanced) : visit.payment.advanced;
+    const previousAdvance = req.body.payment?.previousAdvance !== undefined ? Number(req.body.payment.previousAdvance) : visit.payment.previousAdvance || 0;
     const method = await resolvePaymentMethod(req.body.payment?.method ?? visit.payment.method);
     const pay = billing.computePayment(charges.total, advanced, method.name);
     visit.charges = charges;
     visit.payment = {
+      previousAdvance,
       advanced: pay.advanced,
       method: method.id,
       methodName: method.name,
@@ -551,16 +578,16 @@ const listPaymentMethods = asyncHandler(async (req, res) => {
 });
 
 // ---------- Unified master patient list (Patient + Visit) ----------
-// Enriches each Patient with lastVisit, visitCount and non-negative outstanding balance
-// computed from actual Visit billing records.
+// Enriches each Patient with lastVisit, visitCount, non-negative outstanding (due),
+// total billed, total paid, balance/excess (paid - billed) and their active course.
 const buildPatientRows = async (patients) => {
   if (!patients.length) return [];
   const ids = patients.map((p) => p._id);
-  const [visits, outstandingAgg] = await Promise.all([
+  const [visits, outstandingAgg, moneyAgg, activeCourses] = await Promise.all([
     Visit.find({ patient: { $in: ids } })
       .sort({ visitDate: -1 })
       .select(
-        'patient visitDate visitType branch department doctor opNumber diagnosis treatment noOfDays signature referralDoctor charges payment.received payment.advanced payment.due payment.status'
+        'patient visitDate visitType branch department doctor opNumber diagnosis treatment noOfDays signature referralDoctor charges payment.advanced payment.due payment.status courseId dayNumber totalDays'
       )
       .populate('branch', 'name')
       .populate('department', 'name')
@@ -570,35 +597,67 @@ const buildPatientRows = async (patients) => {
       { $match: { patient: { $in: ids }, 'payment.status': { $in: ['Due', 'Partial'] } } },
       { $group: { _id: '$patient', due: { $sum: '$payment.due' } } },
     ]),
+    Visit.aggregate([
+      { $match: { patient: { $in: ids } } },
+      { $group: { _id: '$patient', billed: { $sum: '$charges.total' }, paid: { $sum: '$payment.advanced' } } },
+    ]),
+    Course.find({ patient: { $in: ids }, status: 'Active' })
+      .sort({ createdAt: -1 })
+      .select('courseNo totalDays dayNumber courseAmount additionalCharges initialAdvance paid due treatment')
+      .lean(),
   ]);
   const dueMap = {};
   outstandingAgg.forEach((r) => {
     dueMap[r._id.toString()] = Math.max(0, r.due || 0);
   });
+  const moneyMap = {};
+  moneyAgg.forEach((r) => {
+    moneyMap[r._id.toString()] = { billed: r.billed || 0, paid: r.paid || 0 };
+  });
+  const courseMap = {};
+  activeCourses.forEach((c) => {
+    if (!courseMap[c.patient.toString()]) courseMap[c.patient.toString()] = c;
+  });
   const lastByPatient = {};
+  const visitCountByPatient = {};
   visits.forEach((v) => {
-    if (lastByPatient[v.patient.toString()] === undefined) lastByPatient[v.patient.toString()] = v;
+    const id = v.patient.toString();
+    visitCountByPatient[id] = (visitCountByPatient[id] || 0) + 1;
+    if (lastByPatient[id] === undefined) lastByPatient[id] = v;
   });
   return patients.map((p) => {
     const id = p._id.toString();
     const last = lastByPatient[id] || null;
+    const money = moneyMap[id] || { billed: 0, paid: 0 };
+    const billed = Math.max(0, money.billed);
+    const paid = Math.max(0, money.paid);
     return {
       ...p.toObject(),
       lastVisit: last,
-      visitCount: visits.filter((v) => v.patient.toString() === id).length,
+      visitCount: visitCountByPatient[id] || 0,
       outstanding: dueMap[id] || 0,
+      billed,
+      paid,
+      due: Math.max(0, Math.round((billed - paid) * 100) / 100),
+      balance: Math.max(0, Math.round((paid - billed) * 100) / 100),
+      activeCourse: courseMap[id] || null,
     };
   });
 };
 
 const listMasterPatients = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 20, search, from, to, branch, department, gender, sort = '-createdAt' } = req.query;
+  const { page = 1, limit = 20, search, from, to, branch, department, gender, ch, sort = '-createdAt' } = req.query;
   const query = {};
   const range = parseRange(from, to);
   if (range.$gte || range.$lte) query.createdAt = range;
   if (branch) query._id = { $in: await Visit.distinct('patient', { branch }) };
   if (department) query._id = { $in: await Visit.distinct('patient', { department }) };
   if (gender) query.gender = gender;
+  if (ch) {
+    const term = String(ch).trim().toLowerCase();
+    if (term === 'home') query.cH = HOME_CH_RE;
+    else if (term === 'clinic') query.cH = { $not: HOME_CH_RE };
+  }
 
   if (search) {
     const term = String(search).trim();
@@ -681,13 +740,18 @@ const deleteMasterPatient = asyncHandler(async (req, res) => {
 
 // ---------- Export master patients (all matching, for admin) ----------
 const exportMasterPatients = asyncHandler(async (req, res) => {
-  const { search, from, to, branch, department, gender } = req.query;
+  const { search, from, to, branch, department, gender, ch } = req.query;
   const query = {};
   const range = parseRange(from, to);
   if (range.$gte || range.$lte) query.createdAt = range;
   if (branch) query._id = { $in: await Visit.distinct('patient', { branch }) };
   if (department) query._id = { $in: await Visit.distinct('patient', { department }) };
   if (gender) query.gender = gender;
+  if (ch) {
+    const term = String(ch).trim().toLowerCase();
+    if (term === 'home') query.cH = HOME_CH_RE;
+    else if (term === 'clinic') query.cH = { $not: HOME_CH_RE };
+  }
   if (search) {
     const term = String(search).trim();
     query.$and = [{ $or: [{ name: new RegExp(term, 'i') }, { uhid: new RegExp(term, 'i') }, { mobile: new RegExp(term, 'i') }] }];

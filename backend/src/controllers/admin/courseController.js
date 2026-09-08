@@ -40,17 +40,36 @@ const resolvePaymentMethod = async (method) => {
 // Total billed for a course = package amount + explicit additional charges.
 const courseBilled = (course) => round2((course.courseAmount || 0) + (course.additionalCharges || 0));
 
-// Recompute a course's paid/due from the authoritative PaymentTransaction ledger.
+// Read-only course ledger (no save): paid / billed / due / balance from the
+// PaymentTransaction ledger plus any initial advance already received.
+const readCourseLedger = async (course) => {
+  const agg = await PaymentTransaction.aggregate([
+    { $match: { courseId: course._id } },
+    { $group: { _id: null, paid: { $sum: '$amount' } } },
+  ]);
+  const paid = round2((agg[0]?.paid || 0) + (course.initialAdvance || 0));
+  const billed = courseBilled(course);
+  return {
+    paid,
+    billed,
+    due: Math.max(0, round2(billed - paid)),
+    balance: Math.max(0, round2(paid - billed)),
+    initialAdvance: round2(course.initialAdvance || 0),
+  };
+};
+
+// Recompute a course's paid/due from the authoritative PaymentTransaction ledger plus
+// any initial advance already received outside the ledger.
 const refreshCourseLedger = async (course, userId) => {
   const agg = await PaymentTransaction.aggregate([
     { $match: { courseId: course._id } },
     { $group: { _id: null, paid: { $sum: '$amount' } } },
   ]);
-  const paid = round2(agg[0]?.paid || 0);
+  const paid = round2((agg[0]?.paid || 0) + (course.initialAdvance || 0));
   course.paid = paid;
   course.due = Math.max(0, round2(courseBilled(course) - paid));
   await course.save();
-  return { paid, due: course.due };
+  return { paid, due: course.due, balance: Math.max(0, round2(paid - courseBilled(course))) };
 };
 
 const findPatient = async (id) => {
@@ -82,9 +101,11 @@ const createCourse = asyncHandler(async (req, res) => {
         mobile,
         age: b.age !== undefined && b.age !== null && b.age !== '' ? Number(b.age) : undefined,
         gender: b.gender || 'Male',
+        cH: b.cH || undefined,
         fN: b.fN || '',
         address: b.address?.trim() || undefined,
         createdBy: req.user._id,
+        createdByName: req.user.name,
       });
     }
   }
@@ -101,6 +122,7 @@ const createCourse = asyncHandler(async (req, res) => {
   if (!Number.isFinite(Number(b.totalDays))) throw new ApiError(400, 'Total days must be a valid number');
 
   const courseAmount = money('Course amount', b.courseAmount);
+  const previousAdvance = money('Previous advance', b.previousAdvance ?? b.initialAdvance);
   const firstPayment = money('First payment', b.firstPayment);
 
   const start = b.startDate || b.visitDate || new Date();
@@ -110,6 +132,8 @@ const createCourse = asyncHandler(async (req, res) => {
   endDate.setDate(endDate.getDate() + totalDays - 1);
 
   const method = await resolvePaymentMethod(b.paymentMethod || b.method);
+
+  const applied = round2(previousAdvance + firstPayment);
 
   const course = await Course.create({
     patient: patient._id,
@@ -124,11 +148,13 @@ const createCourse = asyncHandler(async (req, res) => {
     endDate,
     courseAmount,
     additionalCharges: 0,
-    paid: firstPayment,
-    due: Math.max(0, round2(courseAmount - firstPayment)),
+    initialAdvance: previousAdvance,
+    paid: applied,
+    due: Math.max(0, round2(courseAmount - applied)),
     status: 'Active',
     notes: b.notes?.trim() || undefined,
     createdBy: req.user._id,
+    createdByName: req.user.name,
   });
 
   // Day-1 visit carries the single course billing event. Follow-ups add ₹0.
@@ -154,13 +180,15 @@ const createCourse = asyncHandler(async (req, res) => {
       total: courseAmount,
     },
     payment: {
-      advanced: firstPayment,
+      previousAdvance,
+      advanced: applied,
       method: method.id,
       methodName: method.name,
-      due: Math.max(0, round2(courseAmount - firstPayment)),
-      status: billing.computePayment(courseAmount, firstPayment).status,
+      due: Math.max(0, round2(courseAmount - applied)),
+      status: billing.computePayment(courseAmount, applied).status,
     },
     createdBy: req.user._id,
+    createdByName: req.user.name,
     signature: b.signature?.trim() || undefined,
     courseId: course._id,
     dayNumber: 1,
@@ -183,7 +211,7 @@ const createCourse = asyncHandler(async (req, res) => {
     });
   }
 
-  await course.save();
+  await refreshCourseLedger(course, req.user._id);
   const full = await Course.findById(course._id)
     .populate('branch', 'name')
     .populate('department', 'name')
@@ -212,7 +240,18 @@ const getActiveCourse = asyncHandler(async (req, res) => {
     .populate('branch', 'name')
     .populate('department', 'name')
     .populate('doctor', 'name');
-  res.status(200).json(new ApiResponse(200, { course, visits, billed: courseBilled(course) }));
+  const ledger = await readCourseLedger(course);
+  res.status(200).json(
+    new ApiResponse(200, {
+      ...course.toObject(),
+      billed: ledger.billed,
+      paid: ledger.paid,
+      due: ledger.due,
+      balance: ledger.balance,
+      initialAdvance: ledger.initialAdvance,
+      visits,
+    })
+  );
 });
 
 const getCourse = asyncHandler(async (req, res) => {
@@ -223,7 +262,10 @@ const getCourse = asyncHandler(async (req, res) => {
     .populate('doctor', 'name')
     .populate('patient', 'uhid name mobile');
   if (!course) throw new ApiError(404, 'Course not found');
-  res.status(200).json(new ApiResponse(200, course));
+  const ledger = await readCourseLedger(course);
+  res.status(200).json(
+    new ApiResponse(200, { ...course.toObject(), ...ledger })
+  );
 });
 
 // ---------- List a course's visits ----------
@@ -238,11 +280,17 @@ const listCourseVisits = asyncHandler(async (req, res) => {
     .populate('doctor', 'name')
     .populate('createdBy', 'name');
   const patient = await Patient.findById(course.patient).select('uhid name mobile cH age gender address');
+  const payments = await PaymentTransaction.find({ courseId: course._id })
+    .sort({ paymentDate: 1, createdAt: 1 })
+    .populate('paymentMethodId', 'name')
+    .populate('createdBy', 'name');
+  const ledger = await readCourseLedger(course);
   res.status(200).json(
     new ApiResponse(200, {
-      course,
+      course: { ...course.toObject(), ...ledger },
       visits,
       patient,
+      payments,
       completedDays: visits.length,
     })
   );
@@ -309,6 +357,7 @@ const addFollowUp = asyncHandler(async (req, res) => {
             : 'Paid',
     },
     createdBy: req.user._id,
+    createdByName: req.user.name,
     signature: b.signature?.trim() || undefined,
   });
 
@@ -336,18 +385,14 @@ const addFollowUp = asyncHandler(async (req, res) => {
     });
   }
 
-  const { paid } = await refreshCourseLedger(course, req.user._id);
-  course.dayNumber = nextDay;
-  if (nextDay >= course.totalDays) course.status = 'Completed';
-  course.due = Math.max(0, round2(courseBilled(course) - paid));
-  await course.save();
+  const ledger = await refreshCourseLedger(course, req.user._id);
 
   const full = await Course.findById(course._id)
     .populate('branch', 'name')
     .populate('department', 'name')
     .populate('doctor', 'name');
   res.status(201).json(
-    new ApiResponse(201, { course: full, visit, payment }, `Day ${nextDay} follow-up added`)
+    new ApiResponse(201, { course: full, visit, payment, balance: ledger }, `Day ${nextDay} follow-up added`)
   );
 });
 
@@ -376,32 +421,29 @@ const recordPayment = asyncHandler(async (req, res) => {
     createdBy: req.user._id,
   });
 
-  const { paid, due } = await refreshCourseLedger(course, req.user._id);
-  res.status(201).json(new ApiResponse(201, { course: { ...course.toObject(), paid, due }, payment, balance: { paid, due, billed: courseBilled(course) } }, 'Payment recorded'));
+  const ledger = await refreshCourseLedger(course, req.user._id);
+  res.status(201).json(new ApiResponse(201, { course: { ...course.toObject(), ...ledger }, payment, balance: ledger }, 'Payment recorded'));
 });
 
-// ---------- Course balance (billed / paid / due) ----------
+// ---------- Course balance (billed / paid / due / balance) ----------
 const getCourseBalance = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid course id');
   const course = await Course.findById(req.params.id).populate('patient', 'uhid name mobile');
   if (!course) throw new ApiError(404, 'Course not found');
 
-  const agg = await PaymentTransaction.aggregate([
-    { $match: { courseId: course._id } },
-    { $group: { _id: null, paid: { $sum: '$amount' }, transactions: { $sum: 1 } } },
-  ]);
-  const paid = round2(agg[0]?.paid || 0);
-  const billed = courseBilled(course);
-  const due = Math.max(0, round2(billed - paid));
+  const ledger = await readCourseLedger(course);
+  const payments = await PaymentTransaction.find({ courseId: course._id })
+    .sort({ paymentDate: -1, createdAt: -1 })
+    .populate('paymentMethodId', 'name')
+    .populate('createdBy', 'name');
 
   res.status(200).json(
     new ApiResponse(200, {
-      course,
-      billed,
-      paid,
-      due,
-      transactions: agg[0]?.transactions || 0,
+      course: { ...course.toObject(), ...ledger },
+      ...ledger,
+      transactions: payments.length,
       status: course.status,
+      payments,
     })
   );
 });
@@ -440,17 +482,23 @@ const listPatientCourses = asyncHandler(async (req, res) => {
   });
 
   const rows = courses.map((c) => {
-    const paid = round2(payMap[c._id.toString()]?.paid || 0);
+    const paid = round2((payMap[c._id.toString()]?.paid || 0) + (c.initialAdvance || 0));
     const billed = courseBilled(c);
+    const due = Math.max(0, round2(billed - paid));
+    const balance = Math.max(0, round2(paid - billed));
     return {
       course: {
         ...c.toObject(),
         paid,
-        due: Math.max(0, round2(billed - paid)),
+        due,
+        balance,
+        initialAdvance: round2(c.initialAdvance || 0),
       },
       billed,
       paid,
-      due: Math.max(0, round2(billed - paid)),
+      due,
+      balance,
+      initialAdvance: round2(c.initialAdvance || 0),
       transactions: payMap[c._id.toString()]?.transactions || 0,
       visits: visitsByCourse[c._id.toString()] || [],
       completedDays: (visitsByCourse[c._id.toString()] || []).length,
