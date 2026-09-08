@@ -51,6 +51,8 @@ const visitSchema = new mongoose.Schema(
     // Staff name snapshot so reports keep working if the user record is later removed.
     createdByName: { type: String, trim: true },
     signature: { type: String, trim: true },
+    // Admin → Staff registry reference (from the signature / attendant autocomplete).
+    staffId: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     // Optional course linkage: follow-up visits belong to a Course and never create
     // a new billing event on their own (billing is the course + explicit add-ons).
     courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },

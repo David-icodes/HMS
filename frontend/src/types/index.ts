@@ -175,6 +175,19 @@ export interface User {
   createdAt: string;
 }
 
+export interface Staff {
+  _id: string;
+  name: string;
+  role?: string;
+  mobile?: string;
+  email?: string;
+  branch?: string | { _id: string; name: string } | null;
+  branchId?: string | null;
+  branchName?: string;
+  isActive: boolean;
+  createdAt?: string;
+}
+
 export interface AboutImage {
   _id: string;
   title?: string;

@@ -65,6 +65,13 @@ const {
   listStaffForAttendance,
 } = require('../controllers/admin/attendanceController');
 const {
+  listStaffs,
+  createStaff,
+  getStaff,
+  softDeleteStaff,
+  staffAnalyticsDetail: staffAnalyticsForStaff,
+} = require('../controllers/admin/staffController');
+const {
   createCourse,
   getActiveCourse,
   getCourse,
@@ -116,6 +123,13 @@ router.get('/staff-analytics/detail', authorize('superAdmin', 'admin'), staffAna
 // Staff attendance (admin views)
 router.get('/attendance', authorize('superAdmin', 'admin'), listAttendance);
 router.get('/attendance/staff-list', authorize('superAdmin', 'admin'), listStaffForAttendance);
+
+// Staff management (Admin → Staff) — registry is separate from Users & Roles.
+router.get('/staff', authorize('superAdmin', 'admin'), listStaffs);
+router.post('/staff', authorize('superAdmin', 'admin'), createStaff);
+router.get('/staff/:id', authorize('superAdmin', 'admin'), getStaff);
+router.get('/staff/:id/analytics', authorize('superAdmin', 'admin'), staffAnalyticsForStaff);
+router.delete('/staff/:id', authorize('superAdmin', 'admin'), softDeleteStaff);
 
 router.get('/analytics/branches', authorize('superAdmin', 'admin'), branchList);
 router.get('/analytics/branches/:id', authorize('superAdmin', 'admin'), branchDetail);

@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { staffFetch } from '@/lib/staff-auth';
 import { useStaffReference } from '@/hooks/use-staff-reference';
 import { computeTotals, computePayment, inr, toNum } from '@/lib/billing';
-import type { Course, Patient, User, Visit } from '@/types';
+import type { Course, Patient, Staff, Visit } from '@/types';
 
 const GENDERS = ['Male', 'Female', 'Other'];
 const CH_OPTIONS = ['Clinic', 'Home'];
@@ -25,6 +25,13 @@ interface ExistingPatient extends Patient {
   lastVisit?: Visit | null;
   visitCount?: number;
   outstanding?: number;
+}
+
+interface StaffOption {
+  _id: string;
+  name: string;
+  role: string;
+  mobileNumber: string;
 }
 
 export default function RegistrationForm({
@@ -59,7 +66,7 @@ export default function RegistrationForm({
   const [methodId, setMethodId] = useState('');
   const [signature, setSignature] = useState('');
 
-  const [staffList, setStaffList] = useState<User[]>([]);
+  const [staffList, setStaffList] = useState<StaffOption[]>([]);
   const [staffQuery, setStaffQuery] = useState('');
   const [staffId, setStaffId] = useState('');
 
@@ -74,8 +81,16 @@ export default function RegistrationForm({
   useEffect(() => {
     (async () => {
       try {
-        const res = await staffFetch<{ data: User[] }>('/api/staff/staffs');
-        setStaffList(res.data ?? []);
+        // Staff registry from Admin → Staff (not Users & Roles).
+        const res = await staffFetch<{ data: Staff[] }>('/api/staff/staffs');
+        setStaffList(
+          (res.data ?? []).map((s) => ({
+            _id: s._id,
+            name: s.name,
+            role: s.role || '',
+            mobileNumber: s.mobile || '',
+          })),
+        );
       } catch {
         setStaffList([]);
       }
@@ -89,7 +104,7 @@ export default function RegistrationForm({
       (s) =>
         s.name.toLowerCase().includes(q) ||
         (s.mobileNumber || '').toLowerCase().includes(q) ||
-        (s.username || '').toLowerCase().includes(q),
+        (s.role || '').toLowerCase().includes(q),
     ).slice(0, 30);
   }, [staffList, staffQuery]);
 
@@ -209,7 +224,7 @@ export default function RegistrationForm({
           notes: v.notes.trim() || undefined,
           signature: signature.trim() || undefined,
           additionalCharge: additionalCharge ? Number(additionalCharge) : 0,
-          staff: staffId || undefined,
+          staffId: staffId || undefined,
         },
       });
       toast.success(`Day ${res.data.visit.dayNumber ?? ''} follow-up added`);
@@ -248,7 +263,7 @@ export default function RegistrationForm({
         firstPayment: toNum(amountPaid),
         paymentMethod: methodId || undefined,
         signature: signature.trim() || undefined,
-        staff: staffId || undefined,
+        staffId: staffId || undefined,
       };
       if (selected) {
         body.patientId = selected._id;
@@ -333,6 +348,7 @@ export default function RegistrationForm({
           methodName: selectedMethod?.name,
         },
         signature: signature.trim() || undefined,
+        staffId: staffId || undefined,
       };
       const res = await staffFetch<{ data: { patient: Patient; visit: Visit; isNew: boolean } }>('/api/staff/patients', {
         method: 'POST',
@@ -737,8 +753,32 @@ export default function RegistrationForm({
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-sm font-bold text-slate-900">Record</h3>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Doctor / Staff Signature *">
-            <input value={signature} onChange={(e) => setSignature(e.target.value)} className={inputCls} placeholder="Signature" />
+          <Field label="Doctor / Staff Signature *" hint="Autocomplete from Admin → Staff registry">
+            <input
+              list="signature-staff-list"
+              value={signature}
+              onChange={(e) => {
+                setSignature(e.target.value);
+                setStaffId('');
+              }}
+              onBlur={() => {
+                const q = signature.trim().toLowerCase();
+                const match = staffList.find((s) => s.name.trim().toLowerCase() === q);
+                if (match) setStaffId(match._id);
+              }}
+              className={inputCls}
+              placeholder="Type a staff/doctor name…"
+            />
+            <datalist id="signature-staff-list">
+              {staffList.map((s) => (
+                <option key={s._id} value={s.name}>{`${s.role || 'Staff'}${s.mobileNumber ? ` · ${s.mobileNumber}` : ''}`}</option>
+              ))}
+            </datalist>
+            {staffId ? (
+              <p className="mt-1 text-xs font-medium text-emerald-600">✓ Linked to {signature}</p>
+            ) : signature.trim() ? (
+              <p className="mt-1 text-xs text-slate-400">Custom signature (no staff registry match)</p>
+            ) : null}
           </Field>
         </div>
       </section>

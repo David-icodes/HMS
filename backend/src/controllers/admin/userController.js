@@ -1,4 +1,5 @@
 const User = require('../../models/User');
+const Staff = require('../../models/Staff');
 const ApiError = require('../../utils/ApiError');
 const ApiResponse = require('../../utils/ApiResponse');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -90,12 +91,14 @@ const deleteUser = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, null, 'User deleted successfully'));
 });
 
-// ---------- Staff list (for OP-form autocomplete / staff analytics filters) ----------
+// ---------- Staff list (for OP-form signature / attendant autocomplete) ----------
+// Returns the Admin → Staff registry (active members only), so the OP form's
+// "Doctor / Staff Signature" autocomplete is sourced from the Staff registry.
 const listStaff = asyncHandler(async (req, res) => {
-  const users = await User.find({ isActive: true })
+  const staff = await Staff.find({ isActive: true })
     .sort({ name: 1 })
-    .select('name role username email mobileNumber');
-  res.status(200).json(new ApiResponse(200, users));
+    .select('name role mobile email branch');
+  res.status(200).json(new ApiResponse(200, staff));
 });
 
 module.exports = { listUsers, createUser, updateUser, deleteUser, listStaff };

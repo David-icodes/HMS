@@ -5,7 +5,6 @@ import { CalendarDays, Download, Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import ExcelJS from 'exceljs';
 import { adminFetch } from '@/lib/admin-auth';
-import { staffFetch } from '@/lib/staff-auth';
 import type { Branch } from '@/types';
 
 interface RegisterRow {
@@ -26,7 +25,7 @@ const CH_OPTIONS = ['All', 'Clinic', 'Home'];
 
 const inputCls = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
 
-export default function DailyRegister({ mode = 'admin' }: { mode?: 'admin' | 'staff' }) {
+export default function DailyRegister() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [branch, setBranch] = useState('');
@@ -37,7 +36,7 @@ export default function DailyRegister({ mode = 'admin' }: { mode?: 'admin' | 'st
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const base = mode === 'staff' ? '/api/staff/daily-register' : '/api/admin/daily-register';
+  const base = '/api/admin/daily-register';
 
   const branchNameMap = useCallback(() => {
     const map: Record<string, string> = {};
@@ -60,10 +59,7 @@ export default function DailyRegister({ mode = 'admin' }: { mode?: 'admin' | 'st
       if (to) params.set('to', to);
       if (branch) params.set('branch', branch);
       if (ch !== 'All') params.set('ch', ch.toLowerCase());
-      const res =
-        mode === 'staff'
-          ? await staffFetch<{ data: RegisterRes }>(`${base}?${params}`)
-          : await adminFetch<{ data: RegisterRes }>(`${base}?${params}`);
+      const res = await adminFetch<{ data: RegisterRes }>(`${base}?${params}`);
       const payload = res.data || { data: [], totals: { clinic: 0, home: 0, total: 0 } };
       setRows(Array.isArray(payload.data) ? payload.data : []);
       setTotals(payload.totals || { clinic: 0, home: 0, total: 0 });
@@ -72,7 +68,7 @@ export default function DailyRegister({ mode = 'admin' }: { mode?: 'admin' | 'st
     } finally {
       setLoading(false);
     }
-  }, [mode, base, from, to, branch, ch]);
+  }, [base, from, to, branch, ch]);
 
   useEffect(() => {
     void load();
@@ -88,7 +84,7 @@ export default function DailyRegister({ mode = 'admin' }: { mode?: 'admin' | 'st
       workbook.creator = 'Urmila Raj Hospital';
       const sheet = workbook.addWorksheet('Daily Register');
       const header = ['Date', 'Branch', 'Clinic', 'Home', 'Total'];
-      sheet.columns = header.map((h) => ({ header: h, key: h.toLowerCase(), width: 18 }));
+      sheet.columns = header.map((h) => ({ header: h, key: h, width: 18 }));
       sheet.getRow(1).font = { bold: true };
       rows.forEach((r) => {
         sheet.addRow({

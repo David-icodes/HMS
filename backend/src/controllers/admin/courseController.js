@@ -106,6 +106,7 @@ const createCourse = asyncHandler(async (req, res) => {
         address: b.address?.trim() || undefined,
         createdBy: req.user._id,
         createdByName: req.user.name,
+        staffId: b.staffId || b.staff || undefined,
       });
     }
   }
@@ -155,6 +156,7 @@ const createCourse = asyncHandler(async (req, res) => {
     notes: b.notes?.trim() || undefined,
     createdBy: req.user._id,
     createdByName: req.user.name,
+    staffId: b.staffId || b.staff || undefined,
   });
 
   // Day-1 visit carries the single course billing event. Follow-ups add ₹0.
@@ -193,6 +195,7 @@ const createCourse = asyncHandler(async (req, res) => {
     courseId: course._id,
     dayNumber: 1,
     totalDays,
+    staffId: b.staffId || b.staff || undefined,
   });
 
   let payment = null;
@@ -208,6 +211,7 @@ const createCourse = asyncHandler(async (req, res) => {
       branchId: b.branch || undefined,
       note: 'Course day-1 payment',
       createdBy: req.user._id,
+      staffId: b.staffId || b.staff || undefined,
     });
   }
 
@@ -359,6 +363,7 @@ const addFollowUp = asyncHandler(async (req, res) => {
     createdBy: req.user._id,
     createdByName: req.user.name,
     signature: b.signature?.trim() || undefined,
+    staffId: b.staffId || b.staff || undefined,
   });
 
   if (additionalCharge > 0) {
@@ -382,6 +387,7 @@ const addFollowUp = asyncHandler(async (req, res) => {
       branchId: b.branch || course.branch,
       note: b.paymentNote?.trim() || undefined,
       createdBy: req.user._id,
+      staffId: b.staffId || b.staff || undefined,
     });
   }
 
@@ -419,6 +425,7 @@ const recordPayment = asyncHandler(async (req, res) => {
     branchId: req.body.branchId || course.branch,
     note: req.body.note?.trim() || undefined,
     createdBy: req.user._id,
+    staffId: req.body.staffId || req.body.staff || undefined,
   });
 
   const ledger = await refreshCourseLedger(course, req.user._id);

@@ -24,6 +24,8 @@ const homeVisitSchema = new mongoose.Schema(
     staffInTime: { type: String, trim: true, default: '' },
     staffOutTime: { type: String, trim: true, default: '' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Admin → Staff registry reference (from the signature / attendant autocomplete).
+    staffId: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     invoiceNumber: { type: String, trim: true },
   },
   { timestamps: true }

@@ -13,6 +13,8 @@ const paymentTransactionSchema = new mongoose.Schema(
     branchId: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
     note: { type: String, trim: true, maxlength: 300 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Admin → Staff registry reference (from the signature / attendant autocomplete).
+    staffId: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
   },
   { timestamps: true }
 );

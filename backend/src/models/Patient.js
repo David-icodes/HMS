@@ -16,6 +16,8 @@ const patientSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     // Staff name snapshot so reports keep working if the user record is later removed.
     createdByName: { type: String, trim: true },
+    // Admin → Staff registry reference (from the signature / attendant autocomplete).
+    staffId: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
   },
   { timestamps: true }
 );

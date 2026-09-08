@@ -3,10 +3,13 @@ const Patient = require('../../models/Patient');
 const Visit = require('../../models/Visit');
 const HomeVisit = require('../../models/HomeVisit');
 const PaymentTransaction = require('../../models/PaymentTransaction');
+const Course = require('../../models/Course');
 const Branch = require('../../models/Branch');
 const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
 const asyncHandler = require('../../utils/asyncHandler');
+
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const parseRange = (from, to) => {
   const range = {};
@@ -345,6 +348,97 @@ const revenueReport = asyncHandler(async (req, res) => {
     ]),
   ]);
 
+  // ---- Per-entity Due / Balance (never netted across patients) ----
+  // For each billing entity below, due = MAX(billed − paid, 0) and
+  // balance = MAX(paid − billed, 0); the totals are the SUM of those per-entity
+  // values, so a patient who still owes and a patient with a credit balance both
+  // appear instead of cancelling each other out.
+  //   A) each Course        billed = its visits' charges (course billed once on day-1,
+  //                                   follow-ups ₹0 + explicit additional charges);
+  //                           paid   = its PaymentTransactions + initial advance.
+  //   B) each non-course OP visit: billed = charges.total; paid = payment.advanced
+  //                                (or its standalone PaymentTransactions when present).
+  //   C) each Home Visit doc:      billed = total (or perSession × sessions); paid = advance.
+  let entityDue = 0;
+  let entityBalance = 0;
+
+  // A) Course entities
+  const courseVisMatch = { ...filter, ...visitScope, courseId: { $ne: null } };
+  const courseTxMatch = { ...txFilter, courseId: { $ne: null } };
+  const [courseIdsFromVisits, courseIdsFromTx] = await Promise.all([
+    Visit.distinct('courseId', courseVisMatch),
+    PaymentTransaction.distinct('courseId', courseTxMatch),
+  ]);
+  const courseIds = [
+    ...new Set([
+      ...(courseIdsFromVisits || []).map((x) => x.toString()),
+      ...(courseIdsFromTx || []).map((x) => x.toString()),
+    ]),
+  ];
+  if (courseIds.length) {
+    const [courseDocs, courseVisitAgg, courseTxAgg] = await Promise.all([
+      Course.find({ _id: { $in: courseIds } }).select('_id initialAdvance').lean(),
+      Visit.aggregate([
+        { $match: { ...courseVisMatch, courseId: { $in: courseIds } } },
+        { $group: { _id: '$courseId', billed: { $sum: '$charges.total' }, advanced: { $sum: '$payment.advanced' } } },
+      ]),
+      PaymentTransaction.aggregate([
+        { $match: { ...courseTxMatch, courseId: { $in: courseIds } } },
+        { $group: { _id: '$courseId', paid: { $sum: '$amount' } } },
+      ]),
+    ]);
+    const visitByCourse = {};
+    courseVisitAgg.forEach((r) => (visitByCourse[r._id.toString()] = r));
+    const txByCourse = {};
+    courseTxAgg.forEach((r) => (txByCourse[r._id.toString()] = r));
+    courseDocs.forEach((c) => {
+      const key = c._id.toString();
+      const billed = round2(visitByCourse[key]?.billed || 0);
+      const hasTx = !!txByCourse[key];
+      const paid = hasTx ? round2((txByCourse[key].paid || 0) + (c.initialAdvance || 0)) : round2(visitByCourse[key]?.advanced || 0);
+      entityDue += Math.max(0, billed - paid);
+      entityBalance += Math.max(0, paid - billed);
+    });
+  }
+
+  // B) Non-course OP visits (each visit is a billing entity)
+  const standaloneTxAgg = await PaymentTransaction.aggregate([
+    { $match: { ...txFilter, courseId: null, visitId: { $ne: null } } },
+    { $group: { _id: '$visitId', paid: { $sum: '$amount' } } },
+  ]);
+  const paidByVisit = {};
+  standaloneTxAgg.forEach((r) => (paidByVisit[r._id.toString()] = round2(r.paid || 0)));
+  const nonCourseVisits = await Visit.find({ ...filter, ...visitScope, $or: [{ courseId: null }, { courseId: { $exists: false } }] })
+    .select('charges.total payment.advanced')
+    .lean();
+  nonCourseVisits.forEach((v) => {
+    const billed = round2(v.charges?.total || 0);
+    const paid = paidByVisit[v._id.toString()] ?? round2(v.payment?.advanced || 0);
+    if (!billed && !paid) return;
+    entityDue += Math.max(0, billed - paid);
+    entityBalance += Math.max(0, paid - billed);
+  });
+
+  // C) Home Visit documents (each document is a billing entity)
+  const homeDocs = await HomeVisit.aggregate([
+    { $match: homeMatch },
+    {
+      $project: {
+        billed: {
+          $ifNull: ['$total', { $multiply: [{ $ifNull: ['$perSession', 0] }, { $ifNull: ['$sessions', 1] }] }],
+        },
+        paid: { $ifNull: ['$advance', 0] },
+      },
+    },
+  ]);
+  homeDocs.forEach((h) => {
+    const billed = round2(h.billed);
+    const paid = round2(h.paid);
+    if (!billed && !paid) return;
+    entityDue += Math.max(0, billed - paid);
+    entityBalance += Math.max(0, paid - billed);
+  });
+
   // ---- Summary ----
   const txS = txSummary[0] || {};
   const legS = legacySummary[0] || {};
@@ -390,8 +484,10 @@ const revenueReport = asyncHandler(async (req, res) => {
 
   const totalBilled = Math.max(0, Math.round((billedFromVisits + (homeS.totalBilled || 0)) * 100) / 100);
   const totalPaid = Math.max(0, Math.round(((txS.revenue || 0) + (legS.totalPaid || 0) + (homeS.totalPaid || 0)) * 100) / 100);
-  const totalDue = Math.max(0, Math.round((totalBilled - totalPaid) * 100) / 100);
-  const totalBalance = Math.max(0, Math.round((totalPaid - totalBilled) * 100) / 100);
+  // Due/Balance aggregate per billing entity (see per-entity block above) so both a
+  // patient's outstanding amount AND a patient's un-used credit show up independently.
+  const totalDue = round2(entityDue);
+  const totalBalance = round2(entityBalance);
   const totalTransactions = (txS.transactions || 0) + (legS.transactions || 0) + (homeS.transactions || 0);
 
   // ---- Branch rows ----

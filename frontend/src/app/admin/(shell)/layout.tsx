@@ -16,6 +16,7 @@ function titleFor(pathname: string) {
   if (pathname === '/admin/patients') return 'Patients';
   if (pathname === '/admin/revenue') return 'Revenue';
   if (pathname === '/admin/branch-reports') return 'Branch Reports';
+  if (pathname === '/admin/staff') return 'Staff';
   const match = pathname.match(/^\/admin\/([^/]+)/);
   if (match && MODULES[match[1]]) return MODULES[match[1]].label;
   return 'Admin';

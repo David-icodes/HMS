@@ -39,10 +39,6 @@ const {
   listStaff,
 } = require('../controllers/admin/userController');
 const {
-  dailyRegister,
-  dailyRegisterDetail,
-} = require('../controllers/admin/reportController');
-const {
   createCourse,
   getActiveCourse,
   getCourse,
@@ -62,8 +58,6 @@ router.use(authorize('receptionist', 'admin', 'superAdmin'));
 router.get('/patients', listMasterPatients);
 router.get('/patients/:id/profile-master', getMasterPatient);
 router.get('/payment-methods', listPaymentMethods);
-router.get('/daily-register', dailyRegister);
-router.get('/daily-register/detail', dailyRegisterDetail);
 router.get('/staffs', listStaff);
 
 router.post('/op-registrations', asyncHandler(async (req, res) => {

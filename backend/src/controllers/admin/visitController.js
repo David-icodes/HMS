@@ -144,6 +144,7 @@ const createPatient = asyncHandler(async (req, res) => {
       address: address || undefined,
       createdBy: req.user._id,
       createdByName: req.user.name,
+      staffId: req.body.staffId || undefined,
     });
     isNew = true;
   }
@@ -215,6 +216,7 @@ const createVisitForPatient = async (patient, body, userId, userName) => {
     createdBy: userId,
     createdByName: userName,
     signature: body.signature || undefined,
+    staffId: body.staffId || undefined,
   });
   return visit;
 };
@@ -489,6 +491,7 @@ const createHomeVisit = asyncHandler(async (req, res) => {
     staffInTime: b.staffInTime || '',
     staffOutTime: b.staffOutTime || '',
     createdBy: req.user._id,
+    staffId: b.staffId || undefined,
   });
   const full = await HomeVisit.findById(hv._id).populate('branch', 'name');
   res.status(201).json(new ApiResponse(201, { homeVisit: full }, 'Home visit created'));
@@ -603,7 +606,7 @@ const buildPatientRows = async (patients) => {
     ]),
     Course.find({ patient: { $in: ids }, status: 'Active' })
       .sort({ createdAt: -1 })
-      .select('courseNo totalDays dayNumber courseAmount additionalCharges initialAdvance paid due treatment')
+      .select('patient courseNo totalDays dayNumber courseAmount additionalCharges initialAdvance paid due treatment')
       .lean(),
   ]);
   const dueMap = {};
