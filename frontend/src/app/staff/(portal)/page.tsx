@@ -18,8 +18,10 @@ interface PatientRow extends Patient {
   activeCourse?: { courseNo?: string; totalDays?: number; dayNumber?: number } | null;
 }
 
-interface PatientsRes {
-  data: { data: PatientRow[]; total: number };
+interface DashboardRes {
+  date: string;
+  patients: { total: number; clinic: number; home: number; recent: PatientRow[] };
+  finance: { dailyDue: number; receivedToday: number };
 }
 
 function localDate(d: Date): string {
@@ -31,22 +33,19 @@ export default function StaffDashboard() {
   const [todayPatients, setTodayPatients] = useState<PatientRow[]>([]);
   const [todayTotal, setTodayTotal] = useState(0);
   const [stats, setStats] = useState({ clinic: 0, home: 0 });
+  const [dailyDue, setDailyDue] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const today = localDate(new Date());
 
   const loadPatients = useCallback(async () => {
     try {
-      const res = await staffFetch<PatientsRes>(
-        `/api/staff/patients?from=${today}&to=${today}&limit=1000&sort=-createdAt`,
-      );
-      const patients = Array.isArray(res.data?.data) ? res.data.data : [];
-      setTodayPatients(patients);
-      setTodayTotal(res.data?.total ?? patients.length);
-      setStats({
-        clinic: patients.filter((p) => !/^\s*home\s*$/i.test(p.cH || '')).length,
-        home: patients.filter((p) => /^\s*home\s*$/i.test(p.cH || '')).length,
-      });
+      const res = await staffFetch<{ data: DashboardRes }>(`/api/staff/dashboard?date=${today}`);
+      const dashboard = res.data;
+      setTodayPatients(Array.isArray(dashboard?.patients.recent) ? dashboard.patients.recent : []);
+      setTodayTotal(dashboard?.patients.total ?? 0);
+      setStats({ clinic: dashboard?.patients.clinic ?? 0, home: dashboard?.patients.home ?? 0 });
+      setDailyDue(dashboard?.finance.dailyDue ?? 0);
     } catch {
       /* ignore */
     } finally {
@@ -66,10 +65,11 @@ export default function StaffDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <StatBox icon={Users} label="TODAY'S PATIENTS" value={todayTotal} sub={`${stats.clinic} Clinic · ${stats.home} Home`} />
         <StatBox icon={Stethoscope} label="Clinic Today" value={stats.clinic} tone="teal" />
         <StatBox icon={Home} label="Home Today" value={stats.home} tone="indigo" />
+        <StatBox icon={Stethoscope} label="Daily Due" value={dailyDue} prefix="₹" tone="teal" />
       </div>
 
       <RegistrationForm onRegistered={handleRegistered} />
@@ -164,6 +164,7 @@ function StatBox({
   label: string;
   value: number;
   sub?: string;
+  prefix?: string;
   tone?: 'default' | 'teal' | 'indigo';
 }) {
   const bg = tone === 'indigo' ? 'bg-indigo-50 text-indigo-600' : tone === 'teal' ? 'bg-teal-50 text-teal-600' : 'bg-teal-50 text-teal-600';
@@ -175,7 +176,7 @@ function StatBox({
           <Icon className="h-4 w-4" />
         </div>
       </div>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{value.toLocaleString()}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{prefix}{value.toLocaleString('en-IN')}</p>
       {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
     </div>
   );

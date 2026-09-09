@@ -28,6 +28,7 @@ const {
   generateHomeVisitInvoice,
   listPaymentMethods,
   listMasterPatients,
+  getStaffDashboard,
   getMasterPatient,
 } = require('../controllers/admin/visitController');
 const {
@@ -57,6 +58,7 @@ router.use(sanitize);
 router.use(authorize('receptionist', 'admin', 'superAdmin'));
 
 router.get('/patients', listMasterPatients);
+router.get('/dashboard', getStaffDashboard);
 router.get('/patients/:id/profile-master', getMasterPatient);
 router.get('/payment-methods', listPaymentMethods);
 router.get('/staffs', listStaff);

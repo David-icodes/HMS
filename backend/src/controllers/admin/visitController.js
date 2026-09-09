@@ -3,6 +3,7 @@ const Patient = require('../../models/Patient');
 const Visit = require('../../models/Visit');
 const HomeVisit = require('../../models/HomeVisit');
 const Course = require('../../models/Course');
+const PaymentTransaction = require('../../models/PaymentTransaction');
 const PaymentMethod = require('../../models/PaymentMethod');
 const Branch = require('../../models/Branch');
 const Department = require('../../models/Department');
@@ -685,9 +686,54 @@ const buildPatientRows = async (patients) => {
   });
 };
 
+// Staff dashboard figures are calculated from persisted registrations and the
+// payment ledger, never from the dashboard's rendered patient array.
+const getStaffDashboard = asyncHandler(async (req, res) => {
+  const requestedDate = typeof req.query.date === 'string' ? req.query.date : '';
+  const date = requestedDate || new Date().toISOString().slice(0, 10);
+  const range = parseRange(date, date);
+  if (!range.$gte || !range.$lte) throw new ApiError(400, 'Invalid dashboard date');
+
+  const [patients, courses, coursePayments, standaloneDue, receivedToday] = await Promise.all([
+    Patient.find({ isArchived: { $ne: true }, createdAt: range })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(4)
+      .select('uhid name mobile cH createdAt')
+      .lean(),
+    Course.find().select('_id courseAmount additionalCharges initialAdvance').lean(),
+    PaymentTransaction.aggregate([{ $group: { _id: '$courseId', paid: { $sum: '$amount' } } }]),
+    Visit.aggregate([
+      { $match: { courseId: { $exists: false }, 'payment.status': { $in: ['Due', 'Partial'] } } },
+      { $group: { _id: null, due: { $sum: '$payment.due' } } },
+    ]),
+    PaymentTransaction.aggregate([
+      { $match: { paymentDate: range } },
+      { $group: { _id: null, received: { $sum: '$amount' } } },
+    ]),
+  ]);
+
+  const paymentByCourse = new Map(coursePayments.filter((p) => p._id).map((p) => [String(p._id), p.paid || 0]));
+  const courseDue = courses.reduce((sum, course) => {
+    const billed = Math.max(0, Number(course.courseAmount || 0) + Number(course.additionalCharges || 0));
+    const paid = Math.max(0, Number(course.initialAdvance || 0) + Number(paymentByCourse.get(String(course._id)) || 0));
+    return sum + Math.max(0, billed - paid);
+  }, 0);
+  const clinic = patients.filter((p) => !isHomeCh(p.cH)).length;
+  const home = patients.length - clinic;
+  const total = await Patient.countDocuments({ isArchived: { $ne: true }, createdAt: range });
+  res.status(200).json(new ApiResponse(200, {
+    date,
+    patients: { total, clinic, home, recent: patients },
+    finance: {
+      dailyDue: billing.round2(courseDue + Number(standaloneDue[0]?.due || 0)),
+      receivedToday: billing.round2(Number(receivedToday[0]?.received || 0)),
+    },
+  }));
+});
+
 const listMasterPatients = asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, search, from, to, branch, department, gender, ch, sort = '-createdAt' } = req.query;
-  const query = {};
+  const query = { isArchived: { $ne: true } };
   const range = parseRange(from, to);
   if (range.$gte || range.$lte) query.createdAt = range;
   if (branch) query._id = { $in: await Visit.distinct('patient', { branch }) };
@@ -765,15 +811,11 @@ const deleteMasterPatient = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid patient id');
   const patient = await Patient.findById(req.params.id);
   if (!patient) throw new ApiError(404, 'Patient not found');
-  const visits = await Visit.find({ patient: patient._id }).select('opNumber').lean();
-  const opNumbers = visits.map((v) => v.opNumber).filter(Boolean);
-  await Invoice.deleteMany({ patient: patient._id, opdNumber: { $in: opNumbers } });
-  await Invoice.deleteMany({ patient: patient._id, opdNumber: patient.uhid });
-  await Visit.deleteMany({ patient: patient._id });
-  const uhid = patient.uhid;
-  await Patient.deleteOne({ _id: patient._id });
-  await logActivity({ req, action: 'delete_patient', entity: 'patient', entityId: patient._id, details: { uhid, name: patient.name } });
-  res.status(200).json(new ApiResponse(200, null, 'Patient deleted'));
+  patient.isArchived = true;
+  patient.archivedAt = new Date();
+  await patient.save();
+  await logActivity({ req, action: 'archive_patient', entity: 'patient', entityId: patient._id, details: { uhid: patient.uhid, name: patient.name } });
+  res.status(200).json(new ApiResponse(200, { _id: patient._id, isArchived: true }, 'Patient archived; clinical and financial history was preserved'));
 });
 
 // ---------- Export master patients (all matching, for admin) ----------
@@ -818,6 +860,7 @@ module.exports = {
   deleteHomeVisit,
   generateHomeVisitInvoice,
   listMasterPatients,
+  getStaffDashboard,
   getMasterPatient,
   updateMasterPatient,
   deleteMasterPatient,

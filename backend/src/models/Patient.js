@@ -18,6 +18,10 @@ const patientSchema = new mongoose.Schema(
     createdByName: { type: String, trim: true },
     // Admin → Staff registry reference (from the signature / attendant autocomplete).
     staffId: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    // Archived registrations stay referenced by invoices, courses and payments.
+    // They are excluded from active patient lists but never cascade-delete history.
+    isArchived: { type: Boolean, default: false },
+    archivedAt: { type: Date, default: null },
     // Idempotency key supplied by the registration screen. It is intentionally
     // not an identity field: it only prevents replaying the same submission.
     submissionId: { type: String, trim: true, unique: true, sparse: true },

@@ -68,6 +68,7 @@ const {
   listStaffs,
   createStaff,
   getStaff,
+  updateStaff,
   softDeleteStaff,
   staffAnalyticsDetail: staffAnalyticsForStaff,
 } = require('../controllers/admin/staffController');
@@ -128,6 +129,7 @@ router.get('/attendance/staff-list', authorize('superAdmin', 'admin'), listStaff
 router.get('/staff', authorize('superAdmin', 'admin'), listStaffs);
 router.post('/staff', authorize('superAdmin', 'admin'), createStaff);
 router.get('/staff/:id', authorize('superAdmin', 'admin'), getStaff);
+router.put('/staff/:id', authorize('superAdmin', 'admin'), updateStaff);
 router.get('/staff/:id/analytics', authorize('superAdmin', 'admin'), staffAnalyticsForStaff);
 router.delete('/staff/:id', authorize('superAdmin', 'admin'), softDeleteStaff);
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChartColumn, IdCard, Loader2, Plus, RefreshCw, Search, Trash2, UserCheck, X } from 'lucide-react';
+import { ChartColumn, IdCard, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, UserCheck, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminFetch } from '@/lib/admin-auth';
 import { inr } from '@/lib/billing';
@@ -123,6 +123,7 @@ export default function StaffPage() {
   const [res, setRes] = useState<StaffRes | null>(null);
   const [registryLoading, setRegistryLoading] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<StaffRow | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [branches, setBranches] = useState<{ _id: string; name: string }[]>([]);
@@ -177,15 +178,15 @@ export default function StaffPage() {
     void loadRegistry();
   }, [loadRegistry]);
 
-  const handleAdd = async () => {
+  const handleSave = async () => {
     if (!form.name.trim()) {
       toast.error('Staff name is required');
       return;
     }
     setSaving(true);
     try {
-      await adminFetch<{ data: Staff }>('/api/admin/staff', {
-        method: 'POST',
+      await adminFetch<{ data: Staff }>(editingStaff ? `/api/admin/staff/${editingStaff._id}` : '/api/admin/staff', {
+        method: editingStaff ? 'PUT' : 'POST',
         body: {
           name: form.name.trim(),
           role: form.role.trim() || 'Receptionist',
@@ -194,8 +195,9 @@ export default function StaffPage() {
           branch: form.branchId || undefined,
         },
       });
-      toast.success('Staff member added');
+      toast.success(editingStaff ? 'Staff member updated' : 'Staff member added');
       setAddOpen(false);
+      setEditingStaff(null);
       setForm(EMPTY_FORM);
       void loadRegistry();
     } catch (err) {
@@ -203,6 +205,12 @@ export default function StaffPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openEdit = (staff: StaffRow) => {
+    setEditingStaff(staff);
+    setForm({ name: staff.name, role: staff.role, mobile: staff.mobile, email: staff.email, branchId: staff.branchId || '' });
+    setAddOpen(true);
   };
 
   const handleToggle = async (s: StaffRow) => {
@@ -362,7 +370,7 @@ export default function StaffPage() {
                   Show inactive
                 </label>
                 <button
-                  onClick={() => setAddOpen(true)}
+                  onClick={() => { setEditingStaff(null); setForm(EMPTY_FORM); setAddOpen(true); }}
                   className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700"
                 >
                   <Plus className="h-4 w-4" /> Add staff
@@ -412,6 +420,12 @@ export default function StaffPage() {
                         </td>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => openEdit(s)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            >
+                              <Pencil className="h-3.5 w-3.5" /> Edit
+                            </button>
                             <button
                               onClick={() => void openAnalytics(s)}
                               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
@@ -647,8 +661,8 @@ export default function StaffPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900">Add staff member</h3>
-              <button onClick={() => setAddOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <h3 className="text-sm font-bold text-slate-900">{editingStaff ? 'Edit staff member' : 'Add staff member'}</h3>
+              <button onClick={() => { setAddOpen(false); setEditingStaff(null); }} className="text-slate-400 hover:text-slate-600">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -701,17 +715,17 @@ export default function StaffPage() {
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
-                onClick={() => setAddOpen(false)}
+                onClick={() => { setAddOpen(false); setEditingStaff(null); }}
                 className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >
                 Cancel
               </button>
               <button
-                onClick={() => void handleAdd()}
+                onClick={() => void handleSave()}
                 disabled={saving}
                 className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:opacity-60"
               >
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />} Add staff
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />} {editingStaff ? 'Save changes' : 'Add staff'}
               </button>
             </div>
           </div>

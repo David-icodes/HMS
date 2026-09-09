@@ -115,6 +115,27 @@ const getStaff = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, staff));
 });
 
+// ---------- Update a staff member in place ----------
+const updateStaff = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid staff id');
+  const staff = await Staff.findById(req.params.id);
+  if (!staff) throw new ApiError(404, 'Staff member not found');
+  const name = String(req.body.name ?? staff.name).trim();
+  if (!name) throw new ApiError(400, 'Staff name is required');
+  const duplicate = await Staff.findOne({ _id: { $ne: staff._id }, name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+  if (duplicate) throw new ApiError(409, `Staff member "${name}" already exists`);
+  staff.name = name;
+  if (req.body.role !== undefined) staff.role = String(req.body.role).trim() || 'Receptionist';
+  if (req.body.mobile !== undefined) staff.mobile = String(req.body.mobile).trim();
+  if (req.body.email !== undefined) staff.email = String(req.body.email).trim();
+  if (req.body.branch !== undefined) {
+    staff.branch = req.body.branch && mongoose.isValidObjectId(req.body.branch) ? req.body.branch : null;
+  }
+  if (req.body.isActive !== undefined) staff.isActive = Boolean(req.body.isActive);
+  await staff.save();
+  res.status(200).json(new ApiResponse(200, await Staff.findById(staff._id).populate('branch', 'name'), 'Staff member updated'));
+});
+
 // ---------- Soft delete (deactivate) a staff member ----------
 // Historical patient / visit / course / payment records keep their snapshot names and
 // are never touched. The staff member stops appearing in the autocomplete.
@@ -301,4 +322,4 @@ const staffAnalyticsDetail = asyncHandler(async (req, res) => {
   );
 });
 
-module.exports = { listStaffs, createStaff, getStaff, softDeleteStaff, staffAnalyticsDetail };
+module.exports = { listStaffs, createStaff, getStaff, updateStaff, softDeleteStaff, staffAnalyticsDetail };

@@ -526,7 +526,7 @@ const listPatientCourses = asyncHandler(async (req, res) => {
 // One row per active course with patient info, ledger and progress.
 const listActiveCourses = asyncHandler(async (req, res) => {
   const courses = await Course.find({ status: 'Active' })
-    .sort({ startDate: 1, createdAt: 1 })
+    .sort({ updatedAt: -1, createdAt: -1 })
     .populate('patient', 'uhid name mobile cH age gender address')
     .populate('branch', 'name')
     .populate('department', 'name')
@@ -609,10 +609,9 @@ const listActiveCourses = asyncHandler(async (req, res) => {
   });
 
   rows.sort((a, b) => {
-    const pa = a.completedDays / a.course.totalDays;
-    const pb = b.completedDays / b.course.totalDays;
-    if (pa !== pb) return pa - pb;
-    return new Date(a.course.startDate) - new Date(b.course.startDate);
+    const aActivity = a.lastVisitDate || a.course.startDate;
+    const bActivity = b.lastVisitDate || b.course.startDate;
+    return new Date(bActivity).getTime() - new Date(aActivity).getTime();
   });
 
   res.status(200).json(new ApiResponse(200, rows));
