@@ -23,10 +23,6 @@ interface DashboardRes {
   patients: { total: number; clinic: number; home: number; recent: PatientRow[] };
 }
 
-function localDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 export default function StaffDashboard() {
   const router = useRouter();
   const [todayPatients, setTodayPatients] = useState<PatientRow[]>([]);
@@ -34,11 +30,13 @@ export default function StaffDashboard() {
   const [stats, setStats] = useState({ clinic: 0, home: 0 });
   const [loading, setLoading] = useState(true);
 
-  const today = localDate(new Date());
-
+  // The dashboard never pins a client-computed date: "today" is derived on the
+  // backend from the hospital clock, so the counter rolls over automatically at
+  // the local calendar boundary and a refresh after a registration always reads
+  // the current day.
   const loadPatients = useCallback(async () => {
     try {
-      const res = await staffFetch<{ data: DashboardRes }>(`/api/staff/dashboard?date=${today}`);
+      const res = await staffFetch<{ data: DashboardRes }>(`/api/staff/dashboard`);
       const dashboard = res.data;
       setTodayPatients(Array.isArray(dashboard?.patients.recent) ? dashboard.patients.recent : []);
       setTodayTotal(dashboard?.patients.total ?? 0);
@@ -48,7 +46,7 @@ export default function StaffDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [today]);
+  }, []);
 
   useEffect(() => {
     void loadPatients();
