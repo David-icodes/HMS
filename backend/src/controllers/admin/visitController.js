@@ -711,13 +711,13 @@ const buildPatientRows = async (patients) => {
 // Staff dashboard patient figures are calculated from persisted registrations,
 // never from the dashboard's rendered 4-row preview.
 const getStaffDashboard = asyncHandler(async (req, res) => {
-  const requestedDate = typeof req.query.date === 'string' ? req.query.date : '';
-  // Server-local "today" is authoritative for the dashboard day window, so a
-  // client-supplied date can never shift the boundary across timezones.
-  const fallback = new Date();
-  const date =
-    requestedDate ||
-    `${fallback.getFullYear()}-${String(fallback.getMonth() + 1).padStart(2, '0')}-${String(fallback.getDate()).padStart(2, '0')}`;
+  // Today's Patients is ALWAYS the backend/hospital current local day. A
+  // client-supplied ?date= is never accepted here: the counter must roll over
+  // at the local calendar boundary and cannot be shifted by a stale browser
+  // clock or a cached bundle. Historical days stay reachable via the Daily
+  // Register / report / patient-list date filters.
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const range = parseRange(date, date);
   if (!range.$gte || !range.$lte) throw new ApiError(400, 'Invalid dashboard date');
   // Today's Patients = every patient registration created within the local

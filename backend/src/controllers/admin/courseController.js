@@ -525,7 +525,15 @@ const listPatientCourses = asyncHandler(async (req, res) => {
 // ---------- All active courses across patients (staff follow-up list) ----------
 // One row per active course with patient info, ledger and progress.
 const listActiveCourses = asyncHandler(async (req, res) => {
-  const courses = await Course.find({ status: 'Active' })
+  // Only show courses whose registration record is still active. When admin
+  // archives exactly one selected patient/registration, only that patient's
+  // follow-up entries leave the list; unrelated patients' courses remain and
+  // the course / visit / payment history itself is never deleted.
+  const archivedPatientIds = await Patient.distinct('_id', { isArchived: true });
+  const courses = await Course.find({
+    status: 'Active',
+    ...(archivedPatientIds.length ? { patient: { $nin: archivedPatientIds } } : {}),
+  })
     .sort({ updatedAt: -1, createdAt: -1 })
     .populate('patient', 'uhid name mobile cH age gender address')
     .populate('branch', 'name')
