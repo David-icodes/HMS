@@ -259,7 +259,6 @@ export default function RegistrationForm({
     setSaving(true);
     try {
       const body: Record<string, unknown> = {
-        submissionId: submissionIdRef.current ?? (submissionIdRef.current = crypto.randomUUID()),
         branch: v.branch || undefined,
         department: v.department || undefined,
         doctor: v.doctor || undefined,
@@ -336,6 +335,8 @@ export default function RegistrationForm({
     setSaving(true);
     try {
       const body: Record<string, unknown> = {
+        submissionId: submissionIdRef.current ?? (submissionIdRef.current = crypto.randomUUID()),
+        patientId: selected?._id || undefined,
         patient: {
           name: p.name.trim(),
           mobile: p.mobile.trim(),

@@ -80,48 +80,38 @@ const findPatient = async (id) => {
 };
 
 // ---------- Create course + first (day-1) visit + ONE billing + ONE payment ----------
-// Accepts an existing patientId OR new-patient details (name/mobile/...) which are
-// created/reused here — never duplicated by mobile.
+// Accepts an explicitly selected patientId OR creates a new registration entry.
+// A matching mobile number never reuses an earlier registration.
 const createCourse = asyncHandler(async (req, res) => {
   const b = req.body;
   let patient;
-  let createdPatientId = null;
   let createdCourseId = null;
   let createdVisitId = null;
   let createdPaymentId = null;
+  if (!b.branch) throw new ApiError(400, 'Branch is required.');
+  if (!b.department) throw new ApiError(400, 'Department is required.');
+  if (!b.doctor) throw new ApiError(400, 'Doctor is required.');
+  if (!b.signature?.trim()) throw new ApiError(400, 'Doctor / Staff signature is required.');
   if (b.patientId || b.patient) {
     patient = await findPatient(b.patientId || b.patient);
   } else {
     if (!b.name?.trim() || !b.mobile?.trim()) throw new ApiError(400, 'Patient name and mobile are required');
     const mobile = String(b.mobile).trim();
-    patient = await Patient.findOne({ mobile });
-    if (patient) {
-      const patch = {};
-      if (b.address && !patient.address) patch.address = String(b.address).trim();
-      if (patch.address) await Patient.updateOne({ _id: patient._id }, { $set: patch });
-    } else {
-      patient = await Patient.create({
-        name: String(b.name).trim(),
-        mobile,
-        age: b.age !== undefined && b.age !== null && b.age !== '' ? Number(b.age) : undefined,
-        gender: b.gender || 'Male',
-        cH: b.cH || undefined,
-        fN: b.fN || '',
-        address: b.address?.trim() || undefined,
-        createdBy: req.user._id,
-        createdByName: req.user.name,
-        staffId: b.staffId || b.staff || undefined,
-      });
-      createdPatientId = patient._id;
-    }
+    patient = await Patient.create({
+      name: String(b.name).trim(),
+      mobile,
+      age: b.age !== undefined && b.age !== null && b.age !== '' ? Number(b.age) : undefined,
+      gender: b.gender || 'Male',
+      cH: b.cH || undefined,
+      fN: b.fN || '',
+      address: b.address?.trim() || undefined,
+      createdBy: req.user._id,
+      createdByName: req.user.name,
+      staffId: b.staffId || b.staff || undefined,
+    });
   }
 
   try {
-    if (!b.branch) throw new ApiError(400, 'Branch is required.');
-    if (!b.department) throw new ApiError(400, 'Department is required.');
-    if (!b.doctor) throw new ApiError(400, 'Doctor is required.');
-    if (!b.signature?.trim()) throw new ApiError(400, 'Doctor / Staff signature is required.');
-
     const existing = await Course.findOne({ patient: patient._id, status: 'Active' });
     if (existing) throw new ApiError(409, `Patient already has an active course (${existing.courseNo})`);
 
@@ -235,15 +225,11 @@ const createCourse = asyncHandler(async (req, res) => {
     new ApiResponse(201, { course: full, visit, payment }, `Course ${full.courseNo} created`)
   );
   } catch (err) {
-    // Never report success (or leave the DB in a half-created state) when the
-    // course registration chain fails. Roll back ONLY records this request
-    // created; never touch an existing patient used for a new course.
+    // Clean up failed course records but retain the independently-created
+    // registration entry. It must never disappear silently.
     if (createdPaymentId) await PaymentTransaction.deleteOne({ _id: createdPaymentId }).catch(() => {});
     if (createdVisitId) await Visit.deleteOne({ _id: createdVisitId }).catch(() => {});
     if (createdCourseId) await Course.deleteOne({ _id: createdCourseId }).catch(() => {});
-    if (createdPatientId && patient && String(patient._id) === String(createdPatientId)) {
-      await Patient.deleteOne({ _id: createdPatientId }).catch(() => {});
-    }
     throw err;
   }
 });

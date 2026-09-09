@@ -145,16 +145,19 @@ const createPatient = asyncHandler(async (req, res) => {
   const normalizedName = String(name).trim();
   const normalizedMobile = String(mobile).trim();
 
-  let patient = await Patient.findOne({ mobile: normalizedMobile });
+  const requestedPatientId = req.body.patientId;
+  let patient = null;
   let isNew = false;
   let createdNew = false;
-  if (patient) {
-    // keep existing patient (do not duplicate); never overwrite an existing cH
-    const patch = {};
-    if (address && !patient.address) patch.address = address;
-    if (cH && !patient.cH) patch.cH = cH;
-    if (patch.address || patch.cH) await Patient.updateOne({ _id: patient._id }, { $set: patch });
+  if (requestedPatientId) {
+    // Reuse is allowed only when staff explicitly selected a profile. A
+    // matching mobile number never selects or overwrites an earlier entry.
+    if (!mongoose.isValidObjectId(requestedPatientId)) throw new ApiError(400, 'Invalid selected patient id');
+    patient = await Patient.findById(requestedPatientId);
+    if (!patient) throw new ApiError(404, 'Selected patient not found');
   } else {
+    // This collection is the registration ledger for normal New OP entries:
+    // every submission gets an independent record, even with the same mobile.
     patient = await Patient.create({
       name: normalizedName,
       mobile: normalizedMobile,
@@ -199,7 +202,7 @@ const createPatient = asyncHandler(async (req, res) => {
     }
   }
 
-  await logActivity({ req, action: isNew ? 'create_patient' : 'reuse_patient', entity: 'patient', entityId: patient._id, details: { name: patient.name, uhid: patient.uhid } });
+  await logActivity({ req, action: isNew ? 'create_patient' : 'add_visit', entity: 'patient', entityId: patient._id, details: { name: patient.name, uhid: patient.uhid } });
 
   const savedPatient = await Patient.findById(patient._id);
   if (!savedPatient) throw new ApiError(500, 'Patient save could not be confirmed');
@@ -297,7 +300,7 @@ const listVisits = asyncHandler(async (req, res) => {
   const sortKey = sort.replace(/^-/, '');
   const sortDir = sort.startsWith('-') ? -1 : 1;
   const items = await Visit.find(query)
-    .sort({ [sortKey]: sortDir })
+    .sort({ [sortKey]: sortDir, _id: -1 })
     .skip((Number(page) - 1) * Number(limit))
     .limit(Number(limit))
     .populate(VISIT_POPULATE);
@@ -370,12 +373,7 @@ const adminUpdateVisit = asyncHandler(async (req, res) => {
     if (!patient) throw new ApiError(404, 'Patient not found');
     if (pbody.name !== undefined) patient.name = String(pbody.name).trim();
     if (pbody.mobile !== undefined) {
-      const mobile = String(pbody.mobile).trim();
-      if (mobile && mobile !== patient.mobile) {
-        const dup = await Patient.findOne({ mobile, _id: { $ne: patient._id } });
-        if (dup) throw new ApiError(400, 'Another patient already uses this mobile number');
-      }
-      patient.mobile = mobile;
+      patient.mobile = String(pbody.mobile).trim();
     }
     if (pbody.age !== undefined) patient.age = pbody.age === '' || pbody.age == null ? null : Number(pbody.age);
     if (pbody.gender !== undefined) patient.gender = pbody.gender;
@@ -752,10 +750,6 @@ const updateMasterPatient = asyncHandler(async (req, res) => {
   const patient = await Patient.findById(req.params.id);
   if (!patient) throw new ApiError(404, 'Patient not found');
   const b = req.body.patient || req.body;
-  if (b.mobile !== undefined && b.mobile !== patient.mobile) {
-    const dup = await Patient.findOne({ mobile: b.mobile, _id: { $ne: patient._id } });
-    if (dup) throw new ApiError(400, 'Another patient already uses this mobile number');
-  }
   for (const f of ['name', 'mobile', 'age', 'gender', 'cH', 'fN', 'address']) {
     if (b[f] !== undefined) patient[f] = b[f];
   }
