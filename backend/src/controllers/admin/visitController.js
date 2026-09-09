@@ -127,6 +127,7 @@ const createPatient = asyncHandler(async (req, res) => {
 
   let patient = await Patient.findOne({ mobile });
   let isNew = false;
+  let createdNew = false;
   if (patient) {
     // keep existing patient (do not duplicate); never overwrite an existing cH
     const patch = {};
@@ -147,6 +148,7 @@ const createPatient = asyncHandler(async (req, res) => {
       staffId: req.body.staffId || undefined,
     });
     isNew = true;
+    createdNew = true;
   }
 
   let visit = null;
@@ -161,8 +163,19 @@ const createPatient = asyncHandler(async (req, res) => {
     req.body.payment;
 
   if (hasVisit) {
-    visit = await createVisitForPatient(patient, req.body, req.user._id, req.user.name);
-    if (visit.invoiceNumber) invoice = visit.invoiceNumber;
+    try {
+      visit = await createVisitForPatient(patient, req.body, req.user._id, req.user.name);
+      if (visit.invoiceNumber) invoice = visit.invoiceNumber;
+    } catch (err) {
+      // A failure creating the visit must not leave a half-registered patient
+      // (phantom patient with no visit). Only remove a patient THIS request
+      // created; never touch an existing patient used for a follow-up visit.
+      if (createdNew) {
+        await Patient.deleteOne({ _id: patient._id }).catch(() => {});
+        patient = null;
+      }
+      throw err;
+    }
   }
 
   await logActivity({ req, action: isNew ? 'create_patient' : 'reuse_patient', entity: 'patient', entityId: patient._id, details: { name: patient.name, uhid: patient.uhid } });

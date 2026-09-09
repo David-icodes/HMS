@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Search, UserPlus, History, AlertCircle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { staffFetch } from '@/lib/staff-auth';
@@ -46,6 +46,7 @@ export default function RegistrationForm({
   const [results, setResults] = useState<ExistingPatient[]>([]);
   const [selected, setSelected] = useState<ExistingPatient | null>(null);
   const [saving, setSaving] = useState(false);
+  const submittingRef = useRef(false);
 
   const [p, setP] = useState({ name: '', mobile: '', age: '', gender: 'Male', cH: 'Clinic', fN: '', address: '' });
   const [v, setV] = useState({
@@ -278,15 +279,21 @@ export default function RegistrationForm({
       }
       const res = await staffFetch<{ data: { course: Course; visit: Visit } }>('/api/staff/courses', { method: 'POST', body });
       const courseData = res.data.course;
-      const patId =
-        courseData.patient && typeof courseData.patient === 'object' ? courseData.patient._id : selected?._id || '';
+      const coursePatient =
+        courseData.patient && typeof courseData.patient === 'object' ? (courseData.patient as Patient) : null;
+      const patId = coursePatient?._id || selected?._id || '';
       toast.success(`Course ${courseData.courseNo} created (billed ${inr(amt)})`);
       setCourseMode(false);
       setCourse({ totalDays: '10', courseAmount: '' });
       setPreviousAdvance('');
       setAmountPaid('');
       setSignature('');
-      onRegistered({ patient: { _id: patId, uhid: '', name: p.name.trim(), mobile: p.mobile.trim() } as Patient, visit: res.data.visit });
+      onRegistered({
+        patient:
+          coursePatient ??
+          ({ _id: patId, uhid: '', name: p.name.trim(), mobile: p.mobile.trim() } as Patient),
+        visit: res.data.visit,
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create course');
     } finally {
@@ -296,17 +303,20 @@ export default function RegistrationForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateRequired()) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      if (!validateRequired()) return;
 
-    if (selected && activeCourse && v.visitType === 'Follow-up') {
-      await handleCourseFollowUp();
-      return;
-    }
+      if (selected && activeCourse && v.visitType === 'Follow-up') {
+        await handleCourseFollowUp();
+        return;
+      }
 
-    if (courseMode && !(selected && activeCourse)) {
-      await handleCourseCreate();
-      return;
-    }
+      if (courseMode && !(selected && activeCourse)) {
+        await handleCourseCreate();
+        return;
+      }
 
     setSaving(true);
     try {
@@ -365,6 +375,9 @@ export default function RegistrationForm({
       toast.error(err instanceof Error ? err.message : 'Failed to register patient');
     } finally {
       setSaving(false);
+    }
+    } finally {
+      submittingRef.current = false;
     }
   };
 

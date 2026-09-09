@@ -85,6 +85,10 @@ const findPatient = async (id) => {
 const createCourse = asyncHandler(async (req, res) => {
   const b = req.body;
   let patient;
+  let createdPatientId = null;
+  let createdCourseId = null;
+  let createdVisitId = null;
+  let createdPaymentId = null;
   if (b.patientId || b.patient) {
     patient = await findPatient(b.patientId || b.patient);
   } else {
@@ -108,16 +112,18 @@ const createCourse = asyncHandler(async (req, res) => {
         createdByName: req.user.name,
         staffId: b.staffId || b.staff || undefined,
       });
+      createdPatientId = patient._id;
     }
   }
 
-  if (!b.branch) throw new ApiError(400, 'Branch is required.');
-  if (!b.department) throw new ApiError(400, 'Department is required.');
-  if (!b.doctor) throw new ApiError(400, 'Doctor is required.');
-  if (!b.signature?.trim()) throw new ApiError(400, 'Doctor / Staff signature is required.');
+  try {
+    if (!b.branch) throw new ApiError(400, 'Branch is required.');
+    if (!b.department) throw new ApiError(400, 'Department is required.');
+    if (!b.doctor) throw new ApiError(400, 'Doctor is required.');
+    if (!b.signature?.trim()) throw new ApiError(400, 'Doctor / Staff signature is required.');
 
-  const existing = await Course.findOne({ patient: patient._id, status: 'Active' });
-  if (existing) throw new ApiError(409, `Patient already has an active course (${existing.courseNo})`);
+    const existing = await Course.findOne({ patient: patient._id, status: 'Active' });
+    if (existing) throw new ApiError(409, `Patient already has an active course (${existing.courseNo})`);
 
   const totalDays = Math.max(1, Math.floor(Number(b.totalDays) || 1));
   if (!Number.isFinite(Number(b.totalDays))) throw new ApiError(400, 'Total days must be a valid number');
@@ -158,6 +164,7 @@ const createCourse = asyncHandler(async (req, res) => {
     createdByName: req.user.name,
     staffId: b.staffId || b.staff || undefined,
   });
+  createdCourseId = course._id;
 
   // Day-1 visit carries the single course billing event. Follow-ups add ₹0.
   const visit = await Visit.create({
@@ -197,6 +204,7 @@ const createCourse = asyncHandler(async (req, res) => {
     totalDays,
     staffId: b.staffId || b.staff || undefined,
   });
+  createdVisitId = visit._id;
 
   let payment = null;
   if (firstPayment > 0) {
@@ -213,6 +221,7 @@ const createCourse = asyncHandler(async (req, res) => {
       createdBy: req.user._id,
       staffId: b.staffId || b.staff || undefined,
     });
+    createdPaymentId = payment._id;
   }
 
   await refreshCourseLedger(course, req.user._id);
@@ -225,6 +234,18 @@ const createCourse = asyncHandler(async (req, res) => {
   res.status(201).json(
     new ApiResponse(201, { course: full, visit, payment }, `Course ${full.courseNo} created`)
   );
+  } catch (err) {
+    // Never report success (or leave the DB in a half-created state) when the
+    // course registration chain fails. Roll back ONLY records this request
+    // created; never touch an existing patient used for a new course.
+    if (createdPaymentId) await PaymentTransaction.deleteOne({ _id: createdPaymentId }).catch(() => {});
+    if (createdVisitId) await Visit.deleteOne({ _id: createdVisitId }).catch(() => {});
+    if (createdCourseId) await Course.deleteOne({ _id: createdCourseId }).catch(() => {});
+    if (createdPatientId && patient && String(patient._id) === String(createdPatientId)) {
+      await Patient.deleteOne({ _id: createdPatientId }).catch(() => {});
+    }
+    throw err;
+  }
 });
 
 // ---------- Get the patient's active course (with its visits) ----------
