@@ -84,7 +84,7 @@ const searchPatients = asyncHandler(async (req, res) => {
   ];
   if (digits) or.push({ mobile: new RegExp(digits) });
 
-  let patients = await Patient.find({ $or: or }).sort({ createdAt: -1 }).limit(20);
+  let patients = await Patient.find({ $or: or, isArchived: { $ne: true } }).sort({ createdAt: -1 }).limit(20);
 
   // If matched by OP number only, nurses it through OP-bearing visits.
   if (patients.length === 0) {
@@ -95,7 +95,7 @@ const searchPatients = asyncHandler(async (req, res) => {
     const ids = [...new Set(opVisits.map((v) => v.patient))]
       .filter((id) => mongoose.Types.ObjectId.isValid(id));
     if (ids.length) {
-      patients = await Patient.find({ _id: { $in: ids } }).sort({ createdAt: -1 });
+      patients = await Patient.find({ _id: { $in: ids }, isArchived: { $ne: true } }).sort({ createdAt: -1 });
     }
   }
 
@@ -279,7 +279,10 @@ const listVisits = asyncHandler(async (req, res) => {
   if (search) {
     const term = String(search).trim();
     const Patient = mongoose.model('Patient');
-    const patients = await Patient.find({ $or: [{ name: new RegExp(term, 'i') }, { mobile: new RegExp(term, 'i') }, { uhid: new RegExp(term, 'i') }] }).select('_id').lean();
+    const patients = await Patient.find({
+      isArchived: { $ne: true },
+      $or: [{ name: new RegExp(term, 'i') }, { mobile: new RegExp(term, 'i') }, { uhid: new RegExp(term, 'i') }],
+    }).select('_id').lean();
     const ids = patients.map((p) => p._id);
     query.$or = [{ patient: { $in: ids } }, { opNumber: new RegExp(term, 'i') }, { uhid: new RegExp(term, 'i') }];
   }
@@ -295,6 +298,25 @@ const listVisits = asyncHandler(async (req, res) => {
     const homeIds = await homePatientIds();
     if (term === 'home') query.patient = { $in: homeIds };
     else if (term === 'clinic') query.patient = { $nin: homeIds };
+  }
+
+  // Archived patients are hidden from every patient-facing list. The Patient is
+  // soft-deleted (never cascade-cleaned), so their visits must be excluded here
+  // to keep the Admin OP list and Staff visits in sync with the deletion.
+  const archivedPatientIds = (await Patient.find({ isArchived: true }).select('_id').lean())
+    .flatMap((p) => [p._id, String(p._id)]);
+  if (archivedPatientIds.length) {
+    if (query.patient) {
+      if (Array.isArray(query.patient.$in)) {
+        query.patient.$in = query.patient.$in.filter((id) => !archivedPatientIds.some((a) => String(a) === String(id)));
+      } else if (Array.isArray(query.patient.$nin)) {
+        query.patient.$nin = query.patient.$nin.concat(archivedPatientIds);
+      } else {
+        query.patient = { $nin: [].concat(query.patient, archivedPatientIds) };
+      }
+    } else {
+      query.patient = { $nin: archivedPatientIds };
+    }
   }
 
   const total = await Visit.countDocuments(query);
@@ -686,8 +708,8 @@ const buildPatientRows = async (patients) => {
   });
 };
 
-// Staff dashboard figures are calculated from persisted registrations and the
-// payment ledger, never from the dashboard's rendered patient array.
+// Staff dashboard patient figures are calculated from persisted registrations,
+// never from the dashboard's rendered 4-row preview.
 const getStaffDashboard = asyncHandler(async (req, res) => {
   const requestedDate = typeof req.query.date === 'string' ? req.query.date : '';
   // Server-local "today" is authoritative for the dashboard day window, so a
@@ -704,7 +726,7 @@ const getStaffDashboard = asyncHandler(async (req, res) => {
   // exactly once and course/follow-up/payment activity never inflates them.
   const baseQuery = { isArchived: { $ne: true }, createdAt: range };
 
-  const [total, homeCount, recent, courses, coursePayments, standaloneDue, receivedToday] = await Promise.all([
+  const [total, homeCount, recent] = await Promise.all([
     Patient.countDocuments(baseQuery),
     Patient.countDocuments({ ...baseQuery, cH: HOME_CH_RE }),
     Patient.find(baseQuery)
@@ -712,32 +734,12 @@ const getStaffDashboard = asyncHandler(async (req, res) => {
       .limit(4)
       .select('uhid name mobile cH createdAt')
       .lean(),
-    Course.find().select('_id courseAmount additionalCharges initialAdvance').lean(),
-    PaymentTransaction.aggregate([{ $group: { _id: '$courseId', paid: { $sum: '$amount' } } }]),
-    Visit.aggregate([
-      { $match: { courseId: { $exists: false }, 'payment.status': { $in: ['Due', 'Partial'] } } },
-      { $group: { _id: null, due: { $sum: '$payment.due' } } },
-    ]),
-    PaymentTransaction.aggregate([
-      { $match: { paymentDate: range } },
-      { $group: { _id: null, received: { $sum: '$amount' } } },
-    ]),
   ]);
 
-  const paymentByCourse = new Map(coursePayments.filter((p) => p._id).map((p) => [String(p._id), p.paid || 0]));
-  const courseDue = courses.reduce((sum, course) => {
-    const billed = Math.max(0, Number(course.courseAmount || 0) + Number(course.additionalCharges || 0));
-    const paid = Math.max(0, Number(course.initialAdvance || 0) + Number(paymentByCourse.get(String(course._id)) || 0));
-    return sum + Math.max(0, billed - paid);
-  }, 0);
   const clinic = total - homeCount;
   res.status(200).json(new ApiResponse(200, {
     date,
     patients: { total, clinic, home: homeCount, recent },
-    finance: {
-      dailyDue: billing.round2(courseDue + Number(standaloneDue[0]?.due || 0)),
-      receivedToday: billing.round2(Number(receivedToday[0]?.received || 0)),
-    },
   }));
 });
 
@@ -824,8 +826,12 @@ const deleteMasterPatient = asyncHandler(async (req, res) => {
   patient.isArchived = true;
   patient.archivedAt = new Date();
   await patient.save();
+  // Confirm the archive actually persisted before reporting success, so the UI
+  // never shows "deleted" for a record that is still active.
+  const persisted = await Patient.findById(patient._id).lean();
+  if (!persisted || !persisted.isArchived) throw new ApiError(500, 'Failed to archive patient');
   await logActivity({ req, action: 'archive_patient', entity: 'patient', entityId: patient._id, details: { uhid: patient.uhid, name: patient.name } });
-  res.status(200).json(new ApiResponse(200, { _id: patient._id, isArchived: true }, 'Patient archived; clinical and financial history was preserved'));
+  res.status(200).json(new ApiResponse(200, { deletedId: patient._id, isArchived: true }, 'Patient archived; clinical and financial history was preserved'));
 });
 
 // ---------- Export master patients (all matching, for admin) ----------

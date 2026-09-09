@@ -21,7 +21,6 @@ interface PatientRow extends Patient {
 interface DashboardRes {
   date: string;
   patients: { total: number; clinic: number; home: number; recent: PatientRow[] };
-  finance: { dailyDue: number; receivedToday: number };
 }
 
 function localDate(d: Date): string {
@@ -33,7 +32,6 @@ export default function StaffDashboard() {
   const [todayPatients, setTodayPatients] = useState<PatientRow[]>([]);
   const [todayTotal, setTodayTotal] = useState(0);
   const [stats, setStats] = useState({ clinic: 0, home: 0 });
-  const [dailyDue, setDailyDue] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const today = localDate(new Date());
@@ -45,7 +43,6 @@ export default function StaffDashboard() {
       setTodayPatients(Array.isArray(dashboard?.patients.recent) ? dashboard.patients.recent : []);
       setTodayTotal(dashboard?.patients.total ?? 0);
       setStats({ clinic: dashboard?.patients.clinic ?? 0, home: dashboard?.patients.home ?? 0 });
-      setDailyDue(dashboard?.finance.dailyDue ?? 0);
     } catch {
       /* ignore */
     } finally {
@@ -69,7 +66,6 @@ export default function StaffDashboard() {
         <StatBox icon={Users} label="TODAY'S PATIENTS" value={todayTotal} sub={`${stats.clinic} Clinic · ${stats.home} Home`} />
         <StatBox icon={Stethoscope} label="Clinic Today" value={stats.clinic} tone="teal" />
         <StatBox icon={Home} label="Home Today" value={stats.home} tone="indigo" />
-        <StatBox icon={Stethoscope} label="Daily Due" value={dailyDue} prefix="₹" tone="teal" />
       </div>
 
       <RegistrationForm onRegistered={handleRegistered} />
