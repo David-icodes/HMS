@@ -229,7 +229,7 @@ const createCourse = asyncHandler(async (req, res) => {
     .populate('branch', 'name')
     .populate('department', 'name')
     .populate('doctor', 'name')
-    .populate('patient', 'uhid name mobile');
+    .populate('patient', 'uhid name mobile age gender cH fN address createdAt');
 
   res.status(201).json(
     new ApiResponse(201, { course: full, visit, payment }, `Course ${full.courseNo} created`)

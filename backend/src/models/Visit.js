@@ -58,6 +58,9 @@ const visitSchema = new mongoose.Schema(
     courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
     dayNumber: { type: Number, min: 1 },
     totalDays: { type: Number, min: 1 },
+    // Links a visit to the single browser submission that created it. Sparse
+    // keeps all historical visits valid while rejecting a replayed request.
+    submissionId: { type: String, trim: true, unique: true, sparse: true },
   },
   { timestamps: true }
 );

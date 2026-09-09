@@ -41,6 +41,11 @@ const parseRange = (from, to) => {
 const HOME_CH_RE = /^\s*home\s*$/i;
 const isHomeCh = (v) => HOME_CH_RE.test(v || '');
 
+const patientResponse = (patient) => {
+  const value = patient.toObject ? patient.toObject() : patient;
+  return { ...value, id: String(value._id), createdAt: value.createdAt };
+};
+
 const homePatientIds = async () => {
   const ids = await Patient.distinct('_id', { cH: HOME_CH_RE });
   return ids.map(String);
@@ -125,7 +130,22 @@ const createPatient = asyncHandler(async (req, res) => {
   const { name, mobile, age, gender, cH, fN, address } = req.body.patient || req.body;
   if (!name || !mobile) throw new ApiError(400, 'Patient name and mobile are required');
 
-  let patient = await Patient.findOne({ mobile });
+  const submissionId = typeof req.body.submissionId === 'string' ? req.body.submissionId.trim() : '';
+  if (submissionId) {
+    const replayedVisit = await Visit.findOne({ submissionId }).sort({ createdAt: -1 });
+    if (replayedVisit) {
+      const replayedPatient = await Patient.findById(replayedVisit.patient);
+      if (!replayedPatient) throw new ApiError(409, 'Registration replay could not find its patient');
+      return res.status(200).json(new ApiResponse(200, {
+        patient: patientResponse(replayedPatient), visit: replayedVisit, isNew: false, invoice: replayedVisit.invoiceNumber || null,
+      }, 'Registration already saved'));
+    }
+  }
+
+  const normalizedName = String(name).trim();
+  const normalizedMobile = String(mobile).trim();
+
+  let patient = await Patient.findOne({ mobile: normalizedMobile });
   let isNew = false;
   let createdNew = false;
   if (patient) {
@@ -136,8 +156,8 @@ const createPatient = asyncHandler(async (req, res) => {
     if (patch.address || patch.cH) await Patient.updateOne({ _id: patient._id }, { $set: patch });
   } else {
     patient = await Patient.create({
-      name,
-      mobile,
+      name: normalizedName,
+      mobile: normalizedMobile,
       age: age !== undefined && age !== null && age !== '' ? Number(age) : undefined,
       gender: gender || 'Male',
       cH: cH || undefined,
@@ -146,6 +166,7 @@ const createPatient = asyncHandler(async (req, res) => {
       createdBy: req.user._id,
       createdByName: req.user.name,
       staffId: req.body.staffId || undefined,
+      submissionId: submissionId || undefined,
     });
     isNew = true;
     createdNew = true;
@@ -164,7 +185,7 @@ const createPatient = asyncHandler(async (req, res) => {
 
   if (hasVisit) {
     try {
-      visit = await createVisitForPatient(patient, req.body, req.user._id, req.user.name);
+      visit = await createVisitForPatient(patient, req.body, req.user._id, req.user.name, submissionId);
       if (visit.invoiceNumber) invoice = visit.invoiceNumber;
     } catch (err) {
       // A failure creating the visit must not leave a half-registered patient
@@ -180,11 +201,13 @@ const createPatient = asyncHandler(async (req, res) => {
 
   await logActivity({ req, action: isNew ? 'create_patient' : 'reuse_patient', entity: 'patient', entityId: patient._id, details: { name: patient.name, uhid: patient.uhid } });
 
-  res.status(201).json(new ApiResponse(201, { patient, visit, isNew, invoice }));
+  const savedPatient = await Patient.findById(patient._id);
+  if (!savedPatient) throw new ApiError(500, 'Patient save could not be confirmed');
+  res.status(201).json(new ApiResponse(201, { patient: patientResponse(savedPatient), visit, isNew, invoice }));
 });
 
 // ---------- Add a new visit to an existing patient ----------
-const createVisitForPatient = async (patient, body, userId, userName) => {
+const createVisitForPatient = async (patient, body, userId, userName, submissionId) => {
   const visitType = body.visit?.visitType || 'New OP';
   // Required fields for every NEW OP record (spec). Follow-ups inherit from their
   // course/previous visit and only use values provided. Historical records are untouched.
@@ -230,6 +253,7 @@ const createVisitForPatient = async (patient, body, userId, userName) => {
     createdByName: userName,
     signature: body.signature || undefined,
     staffId: body.staffId || undefined,
+    submissionId: submissionId || undefined,
   });
   return visit;
 };
@@ -689,7 +713,9 @@ const listMasterPatients = asyncHandler(async (req, res) => {
   const sortKey = sort.replace(/^-/, '');
   const sortDir = sort.startsWith('-') ? -1 : 1;
   const patients = await Patient.find(query)
-    .sort({ [sortKey]: sortDir })
+    // Stable ordering keeps a newly saved patient at the top of page one even
+    // when two registrations share the same millisecond timestamp.
+    .sort({ [sortKey]: sortDir, _id: -1 })
     .skip((Number(page) - 1) * Number(limit))
     .limit(Number(limit));
 

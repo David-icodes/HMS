@@ -47,6 +47,8 @@ export default function RegistrationForm({
   const [selected, setSelected] = useState<ExistingPatient | null>(null);
   const [saving, setSaving] = useState(false);
   const submittingRef = useRef(false);
+  const submissionIdRef = useRef<string | null>(null);
+  const [submissionComplete, setSubmissionComplete] = useState(false);
 
   const [p, setP] = useState({ name: '', mobile: '', age: '', gender: 'Male', cH: 'Clinic', fN: '', address: '' });
   const [v, setV] = useState({
@@ -159,6 +161,8 @@ export default function RegistrationForm({
   };
 
   const selectPatient = (pat: ExistingPatient) => {
+    setSubmissionComplete(false);
+    submissionIdRef.current = null;
     setSelected(pat);
     setP({
       name: pat.name,
@@ -175,6 +179,8 @@ export default function RegistrationForm({
   };
 
   const clearSelection = () => {
+    setSubmissionComplete(false);
+    submissionIdRef.current = null;
     setSelected(null);
     setSearch('');
     setResults([]);
@@ -229,6 +235,7 @@ export default function RegistrationForm({
         },
       });
       toast.success(`Day ${res.data.visit.dayNumber ?? ''} follow-up added`);
+      setSubmissionComplete(true);
       setAdditionalCharge('');
       setV((s) => ({ ...s, diagnosis: '', treatment: '', notes: '', visitType: 'Follow-up' }));
       void loadActiveCourse(activeCourse.patient && typeof activeCourse.patient === 'object' ? activeCourse.patient._id : String(selected?._id));
@@ -252,6 +259,7 @@ export default function RegistrationForm({
     setSaving(true);
     try {
       const body: Record<string, unknown> = {
+        submissionId: submissionIdRef.current ?? (submissionIdRef.current = crypto.randomUUID()),
         branch: v.branch || undefined,
         department: v.department || undefined,
         doctor: v.doctor || undefined,
@@ -278,9 +286,15 @@ export default function RegistrationForm({
         body.address = p.address.trim() || undefined;
       }
       const res = await staffFetch<{ data: { course: Course; visit: Visit } }>('/api/staff/courses', { method: 'POST', body });
-      const courseData = res.data.course;
+      const courseData = res.data?.course;
+      if (!courseData?._id || !res.data?.visit?._id) {
+        throw new Error('Course registration was not confirmed by the server. Please try again.');
+      }
       const coursePatient =
         courseData.patient && typeof courseData.patient === 'object' ? (courseData.patient as Patient) : null;
+      if (!coursePatient?._id || !coursePatient.createdAt) {
+        throw new Error('Course patient was not confirmed by the server. Please try again.');
+      }
       const patId = coursePatient?._id || selected?._id || '';
       toast.success(`Course ${courseData.courseNo} created (billed ${inr(amt)})`);
       setCourseMode(false);
@@ -288,6 +302,7 @@ export default function RegistrationForm({
       setPreviousAdvance('');
       setAmountPaid('');
       setSignature('');
+      setSubmissionComplete(true);
       onRegistered({
         patient:
           coursePatient ??
@@ -303,7 +318,7 @@ export default function RegistrationForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submittingRef.current) return;
+    if (submittingRef.current || submissionComplete) return;
     submittingRef.current = true;
     try {
       if (!validateRequired()) return;
@@ -364,12 +379,17 @@ export default function RegistrationForm({
         method: 'POST',
         body,
       });
+      if (!res.data?.patient?._id || !res.data?.patient?.createdAt || !res.data?.visit?._id) {
+        throw new Error('Registration was not confirmed by the server. Please try again.');
+      }
       const result = { patient: res.data.patient, visit: res.data.visit };
       toast.success(
         res.data.isNew ? `New patient registered: ${res.data.patient.uhid}` : `Visit saved under ${res.data.patient.uhid}`,
       );
       setSignature('');
       setSelected({ ...(result.patient as ExistingPatient), visitCount: 1, outstanding: result.visit.payment.due });
+      submissionIdRef.current = null;
+      setSubmissionComplete(true);
       onRegistered(result);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to register patient');
@@ -804,12 +824,14 @@ export default function RegistrationForm({
 
       <button
         type="submit"
-        disabled={saving}
+        disabled={saving || submissionComplete}
         className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-60"
       >
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
         {saving
           ? 'Saving…'
+          : submissionComplete
+            ? 'Saved — select or clear a patient to register again'
           : selected && activeCourse && v.visitType === 'Follow-up'
             ? `Add Follow-up (Day ${nextDay})`
             : courseMode && !activeCourse
