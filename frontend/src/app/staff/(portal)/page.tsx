@@ -158,6 +158,7 @@ function StatBox({
   label,
   value,
   sub,
+  prefix = '',
   tone = 'default',
 }: {
   icon: typeof Users;
