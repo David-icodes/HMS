@@ -690,12 +690,24 @@ const buildPatientRows = async (patients) => {
 // payment ledger, never from the dashboard's rendered patient array.
 const getStaffDashboard = asyncHandler(async (req, res) => {
   const requestedDate = typeof req.query.date === 'string' ? req.query.date : '';
-  const date = requestedDate || new Date().toISOString().slice(0, 10);
+  // Server-local "today" is authoritative for the dashboard day window, so a
+  // client-supplied date can never shift the boundary across timezones.
+  const fallback = new Date();
+  const date =
+    requestedDate ||
+    `${fallback.getFullYear()}-${String(fallback.getMonth() + 1).padStart(2, '0')}-${String(fallback.getDate()).padStart(2, '0')}`;
   const range = parseRange(date, date);
   if (!range.$gte || !range.$lte) throw new ApiError(400, 'Invalid dashboard date');
+  // Today's Patients = every patient registration created within the local
+  // hospital day (Clinic + Home). Counts come from the Patient collection
+  // itself, never from the 4-row preview, so every registration is counted
+  // exactly once and course/follow-up/payment activity never inflates them.
+  const baseQuery = { isArchived: { $ne: true }, createdAt: range };
 
-  const [patients, courses, coursePayments, standaloneDue, receivedToday] = await Promise.all([
-    Patient.find({ isArchived: { $ne: true }, createdAt: range })
+  const [total, homeCount, recent, courses, coursePayments, standaloneDue, receivedToday] = await Promise.all([
+    Patient.countDocuments(baseQuery),
+    Patient.countDocuments({ ...baseQuery, cH: HOME_CH_RE }),
+    Patient.find(baseQuery)
       .sort({ createdAt: -1, _id: -1 })
       .limit(4)
       .select('uhid name mobile cH createdAt')
@@ -718,12 +730,10 @@ const getStaffDashboard = asyncHandler(async (req, res) => {
     const paid = Math.max(0, Number(course.initialAdvance || 0) + Number(paymentByCourse.get(String(course._id)) || 0));
     return sum + Math.max(0, billed - paid);
   }, 0);
-  const clinic = patients.filter((p) => !isHomeCh(p.cH)).length;
-  const home = patients.length - clinic;
-  const total = await Patient.countDocuments({ isArchived: { $ne: true }, createdAt: range });
+  const clinic = total - homeCount;
   res.status(200).json(new ApiResponse(200, {
     date,
-    patients: { total, clinic, home, recent: patients },
+    patients: { total, clinic, home: homeCount, recent },
     finance: {
       dailyDue: billing.round2(courseDue + Number(standaloneDue[0]?.due || 0)),
       receivedToday: billing.round2(Number(receivedToday[0]?.received || 0)),
