@@ -9,6 +9,7 @@ const Branch = require('../../models/Branch');
 const Department = require('../../models/Department');
 const Doctor = require('../../models/Doctor');
 const Invoice = require('../../models/Invoice');
+const { patientIdsByRegistrationBranch } = require('../../utils/registrationBranch');
 const ApiError = require('../../utils/ApiError');
 const ApiResponse = require('../../utils/ApiResponse');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -748,7 +749,7 @@ const listMasterPatients = asyncHandler(async (req, res) => {
   const query = { isArchived: { $ne: true } };
   const range = parseRange(from, to);
   if (range.$gte || range.$lte) query.createdAt = range;
-  if (branch) query._id = { $in: await Visit.distinct('patient', { branch }) };
+  if (branch) query._id = { $in: await patientIdsByRegistrationBranch(branch) };
   if (department) query._id = { $in: await Visit.distinct('patient', { department }) };
   if (gender) query.gender = gender;
   if (ch) {
@@ -840,7 +841,7 @@ const exportMasterPatients = asyncHandler(async (req, res) => {
   const query = {};
   const range = parseRange(from, to);
   if (range.$gte || range.$lte) query.createdAt = range;
-  if (branch) query._id = { $in: await Visit.distinct('patient', { branch }) };
+  if (branch) query._id = { $in: await patientIdsByRegistrationBranch(branch) };
   if (department) query._id = { $in: await Visit.distinct('patient', { department }) };
   if (gender) query.gender = gender;
   if (ch) {

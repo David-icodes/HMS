@@ -5,6 +5,7 @@ const HomeVisit = require('../../models/HomeVisit');
 const PaymentTransaction = require('../../models/PaymentTransaction');
 const Course = require('../../models/Course');
 const Branch = require('../../models/Branch');
+const { registrationCountsByBranch, patientIdsByRegistrationBranch } = require('../../utils/registrationBranch');
 const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -49,101 +50,69 @@ const homePatientIds = async () => {
   return ids;
 };
 
-// ---------- Branch list with per-branch aggregates ----------
+// ---------- Branch list: patients per branch from registration records ----------
+// Branch patient counts come from the canonical Patient registration ledger
+// attributed to the branch of each registration (first New OP visit). Visit,
+// follow-up, course-day and payment records never multiply these counts, and an
+// archived (deleted) registration drops out immediately.
 const branchList = asyncHandler(async (req, res) => {
-  const filter = buildVisitFilter(req.query);
-
-  const agg = await Visit.aggregate([
-    { $match: filter },
-    {
-      $group: {
-        _id: '$branch',
-        totalOPVisits: { $sum: 1 },
-        totalPatients: { $addToSet: '$patient' },
-        totalBilled: { $sum: '$charges.total' },
-        totalPaid: { $sum: '$payment.advanced' },
-        totalDue: { $sum: '$payment.due' },
-      },
-    },
-    {
-      $project: {
-        _id: 1,
-        totalOPVisits: 1,
-        totalPatients: { $size: { $ifNull: ['$totalPatients', []] } },
-        totalBilled: { $round: ['$totalBilled', 2] },
-        totalPaid: { $round: ['$totalPaid', 2] },
-        totalDue: { $round: ['$totalDue', 2] },
-      },
-    },
-  ]);
-
-  const aggById = {};
-  agg.forEach((a) => {
-    if (a._id) aggById[a._id.toString()] = a;
-  });
-
+  const q = req.query;
+  const range = parseRange(q.date || q.from, q.date || q.to);
+  const counts = await registrationCountsByBranch(range);
   const branches = await Branch.find({ isActive: true }).sort({ order: 1, name: 1 });
   const rows = branches.map((b) => {
-    const a = aggById[b._id.toString()] || {};
+    const c = counts.get(b._id.toString()) || { patients: 0, clinic: 0, home: 0 };
     return {
       _id: b._id,
       name: b.name,
       area: b.area,
-      totalPatients: a.totalPatients || 0,
-      totalOPVisits: a.totalOPVisits || 0,
-      totalBilled: a.totalBilled || 0,
-      totalPaid: a.totalPaid || 0,
-      totalDue: a.totalDue || 0,
+      patients: c.patients,
+      clinicPatients: c.clinic,
+      homePatients: c.home,
     };
   });
 
   res.status(200).json(new ApiResponse(200, rows));
 });
 
-// ---------- Single branch detail: stats + visit/patient list ----------
+// ---------- Single branch: registration-based stats + registration list ----------
 const branchDetail = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid branch id');
   const branch = await Branch.findById(req.params.id);
   if (!branch) throw new ApiError(404, 'Branch not found');
 
-  const filter = { branch: new mongoose.Types.ObjectId(req.params.id), ...buildVisitFilter(req.query) };
+  const q = req.query;
+  const range = parseRange(q.date || q.from, q.date || q.to);
+  const counts = await registrationCountsByBranch(range);
+  const c = counts.get(req.params.id) || { patients: 0, clinic: 0, home: 0 };
 
-  const [sum, visits] = await Promise.all([
-    Visit.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          totalOPVisits: { $sum: 1 },
-          totalPatients: { $addToSet: '$patient' },
-          totalBilled: { $sum: '$charges.total' },
-          totalPaid: { $sum: '$payment.advanced' },
-          totalDue: { $sum: '$payment.due' },
-        },
-      },
-    ]),
-    Visit.find(filter)
-      .sort({ visitDate: -1, createdAt: -1 })
-      .populate('patient', 'uhid name mobile')
-      .populate('department', 'name')
-      .populate('doctor', 'name')
-      .populate('payment.method', 'name'),
-  ]);
-
-  const s = sum[0] || {};
-  const stat = {
-    totalPatients: (s.totalPatients || []).length,
-    totalOPVisits: s.totalOPVisits || 0,
-    totalBilled: s.totalBilled || 0,
-    totalPaid: s.totalPaid || 0,
-    totalDue: s.totalDue || 0,
+  const ids = await patientIdsByRegistrationBranch(req.params.id);
+  const query = {
+    isArchived: { $ne: true },
+    _id: { $in: ids },
+    ...(range.$gte || range.$lte ? { createdAt: range } : {}),
   };
+  const page = Math.max(1, Math.floor(Number(q.page) || 1));
+  const limit = Math.min(500, Math.max(1, Math.floor(Number(q.limit) || 100)));
+  const [total, registrations] = await Promise.all([
+    Patient.countDocuments(query),
+    Patient.find(query)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select('uhid name mobile age gender cH fN address createdAt')
+      .lean(),
+  ]);
 
   res.status(200).json(
     new ApiResponse(200, {
       branch: { _id: branch._id, name: branch.name, area: branch.area, phone: branch.phone },
-      stats: stat,
-      visits,
+      stats: { patients: c.patients, clinicPatients: c.clinic, homePatients: c.home },
+      registrations,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
     })
   );
 });

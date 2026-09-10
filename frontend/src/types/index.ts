@@ -249,6 +249,11 @@ export interface StatSummary {
   todayOp: number;
   totalBlogs: number;
   totalServices: number;
+  totalPatients: number;
+  todayPatients: number;
+  clinicToday: number;
+  homeToday: number;
+  todayDate: string;
 }
 
 export interface DashboardData {

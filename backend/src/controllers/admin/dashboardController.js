@@ -1,5 +1,5 @@
+const Patient = require('../../models/Patient');
 const Appointment = require('../../models/Appointment');
-const OpRegistration = require('../../models/OpRegistration');
 const Doctor = require('../../models/Doctor');
 const Branch = require('../../models/Branch');
 const Service = require('../../models/Service');
@@ -12,17 +12,33 @@ const ActivityLog = require('../../models/ActivityLog');
 const ApiResponse = require('../../utils/ApiResponse');
 const asyncHandler = require('../../utils/asyncHandler');
 
+// C/H split: patients whose C/H is Home (free-text, case/space tolerant) are
+// Home; everything else (including legacy patients without a C/H) counts as Clinic.
+const HOME_CH_RE = /^\s*home\s*$/i;
+
+// Today's Patients is the hospital-local day: [start of local day, start of the
+// next local day). Never a UTC date string.
+const localDayRange = () => {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(start.getTime() + 86400000);
+  const label = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+  return { start, end, label };
+};
+
 const getDashboard = asyncHandler(async (req, res) => {
   const today = new Date();
   const dayKey = today.toISOString().slice(0, 10);
-  const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-  const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+  const day = localDayRange();
+  const todayWindow = { $gte: day.start, $lt: day.end };
 
   const [
     totalAppointments,
     todayAppointments,
-    totalOp,
-    todayOp,
+    totalPatients,
+    todayPatients,
+    clinicToday,
+    homeToday,
     totalDoctors,
     totalBranches,
     totalServices,
@@ -32,13 +48,15 @@ const getDashboard = asyncHandler(async (req, res) => {
     totalUsers,
     visits,
     recentAppointments,
-    recentOp,
+    recentPatients,
     recentActivity,
   ] = await Promise.all([
     Appointment.countDocuments(),
-    Appointment.countDocuments({ createdAt: { $gte: startOfDay, $lte: endOfDay } }),
-    OpRegistration.countDocuments(),
-    OpRegistration.countDocuments({ createdAt: { $gte: startOfDay, $lte: endOfDay } }),
+    Appointment.countDocuments({ createdAt: todayWindow }),
+    Patient.countDocuments({ isArchived: { $ne: true } }),
+    Patient.countDocuments({ isArchived: { $ne: true }, createdAt: todayWindow }),
+    Patient.countDocuments({ isArchived: { $ne: true }, createdAt: todayWindow, cH: { $not: HOME_CH_RE } }),
+    Patient.countDocuments({ isArchived: { $ne: true }, createdAt: todayWindow, cH: HOME_CH_RE }),
     Doctor.countDocuments({ isActive: true }),
     Branch.countDocuments({ isActive: true }),
     Service.countDocuments({ isActive: true }),
@@ -48,7 +66,10 @@ const getDashboard = asyncHandler(async (req, res) => {
     User.countDocuments(),
     Setting.find({ key: { $in: ['visits.total', 'visits.today'] } }),
     Appointment.find().sort({ createdAt: -1 }).limit(8).populate('branch doctor'),
-    OpRegistration.find().sort({ createdAt: -1 }).limit(8).populate('branch department'),
+    Patient.find({ isArchived: { $ne: true } })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(8)
+      .select('uhid name mobile cH fN createdAt'),
     ActivityLog.find().sort({ createdAt: -1 }).limit(10),
   ]);
 
@@ -65,7 +86,7 @@ const getDashboard = asyncHandler(async (req, res) => {
   const appointmentsTrend = await Appointment.aggregate([
     {
       $group: {
-        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' } },
         count: { $sum: 1 },
       },
     },
@@ -73,15 +94,18 @@ const getDashboard = asyncHandler(async (req, res) => {
     { $limit: 14 },
   ]);
 
-  const opTrend = await OpRegistration.aggregate([
+  // Registration trend (Patient ledger), latest 14 days by local day.
+  const patientTrend = await Patient.aggregate([
+    { $match: { isArchived: { $ne: true } } },
     {
       $group: {
-        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' } },
         count: { $sum: 1 },
       },
     },
-    { $sort: { _id: 1 } },
+    { $sort: { _id: -1 } },
     { $limit: 14 },
+    { $sort: { _id: 1 } },
   ]);
 
   const appointmentByStatus = await Appointment.aggregate([
@@ -93,8 +117,12 @@ const getDashboard = asyncHandler(async (req, res) => {
       stats: {
         totalAppointments,
         todayAppointments,
-        totalOp,
-        todayOp,
+        // Patient registration ledger (admin dashboard patient figures).
+        totalPatients,
+        todayPatients,
+        clinicToday,
+        homeToday,
+        todayDate: day.label,
         totalDoctors,
         totalBranches,
         totalServices,
@@ -102,17 +130,20 @@ const getDashboard = asyncHandler(async (req, res) => {
         totalPosts,
         totalGallery,
         totalUsers,
+        // Aliases kept for older consumers that referenced the legacy OP name.
+        totalOp: totalPatients,
+        todayOp: todayPatients,
         totalVisitors: typeof visitsMap['visits.total'] === 'number' ? visitsMap['visits.total'] : 0,
         todayVisitors: isTodayVisit,
       },
       charts: {
         appointmentsTrend,
-        opTrend,
+        opTrend: patientTrend,
         appointmentByStatus,
       },
       recent: {
         appointments: recentAppointments,
-        opRegistrations: recentOp,
+        opRegistrations: recentPatients,
       },
       activity: recentActivity,
     })

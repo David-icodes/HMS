@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   CalendarCheck,
-  Ticket,
   Stethoscope,
   Building2,
   Briefcase,
@@ -18,6 +17,8 @@ import {
   Wallet,
   AlertTriangle,
   Calendar as CalendarIcon,
+  ClipboardList,
+  Home,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminFetch } from '@/lib/admin-auth';
@@ -27,8 +28,11 @@ import type { Branch } from '@/types';
 interface Stat {
   totalAppointments: number;
   todayAppointments: number;
-  totalOp: number;
-  todayOp: number;
+  totalPatients: number;
+  todayPatients: number;
+  clinicToday: number;
+  homeToday: number;
+  todayDate: string;
   totalDoctors: number;
   totalBranches: number;
   totalServices: number;
@@ -130,14 +134,16 @@ function RevStat({ label, value, tone }: { label: string; value: string; tone: '
 const inputCls =
   'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
 
-function dayOffsetIso(days: number): string {
+// Dates are the hospital-local calendar dates. Never use toISOString() for the
+// business date: on an IST machine UTC and local days differ for half the day.
+function localDateIso(offsetDays: number): string {
   const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso(0);
 }
 
 export default function AdminDashboardPage() {
@@ -166,7 +172,7 @@ export default function AdminDashboardPage() {
   const dayParams = useMemo(() => {
     if (mode === 'today') return { from: todayIso(), to: todayIso() };
     if (mode === 'yesterday') {
-      const yd = dayOffsetIso(-1);
+      const yd = localDateIso(-1);
       return { from: yd, to: yd };
     }
     if (mode === 'date') {
@@ -229,9 +235,9 @@ export default function AdminDashboardPage() {
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard icon={CalendarCheck} label="Appointments" value={stats.totalAppointments} sub={`${stats.todayAppointments} today`} to="/admin/appointments" />
-        <StatCard icon={Ticket} label="OP Registrations" value={stats.totalOp} sub={`${stats.todayOp} today`} to="/admin/op-registrations" />
-        <StatCard icon={Stethoscope} label="Active Doctors" value={stats.totalDoctors} to="/admin/doctors" />
-        <StatCard icon={Building2} label="Branches" value={stats.totalBranches} to="/admin/branches" />
+        <StatCard icon={Users} label="Today's Patients" value={stats.todayPatients} sub={`Clinic ${stats.clinicToday} · Home ${stats.homeToday} · ${stats.todayDate}`} to="/admin/patients" />
+        <StatCard icon={ClipboardList} label="Clinic Today" value={stats.clinicToday} to="/admin/patients" />
+        <StatCard icon={Home} label="Home Today" value={stats.homeToday} to="/admin/patients" />
       </div>
 
       <div>
@@ -415,6 +421,7 @@ export default function AdminDashboardPage() {
         <h3 className="mb-4 text-sm font-bold text-slate-900">Content overview</h3>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
           {[
+            { label: 'Patients', value: stats.totalPatients, icon: Users, href: '/admin/patients' },
             { label: 'Doctors', value: stats.totalDoctors, icon: Stethoscope, href: '/admin/doctors' },
             { label: 'Branches', value: stats.totalBranches, icon: Building2, href: '/admin/branches' },
             { label: 'Services', value: stats.totalServices, icon: Briefcase, href: '/admin/services' },
