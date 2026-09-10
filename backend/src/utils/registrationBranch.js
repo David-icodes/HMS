@@ -32,9 +32,16 @@ const registrationStage = [
 
 const isHomeExpr = { $in: [{ $toLower: { $trim: { input: { $ifNull: ['$doc.cH', ''] } } } }, ['home']] };
 
-// Counts per branch of ACTIVE registrations (optionally within a createdAt
-// window). Returns Map<branchId, { patients, clinic, home }>.
-const registrationCountsByBranch = async (range = {}) => {
+// ONE aggregation that returns, per branch of ACTIVE registrations (optionally
+// within a createdAt window):
+//   counts       Map<branchId, { patients, clinic, home }>
+//   idsByBranch  Map<branchId, ObjectId[]>
+//   attribution  Map<patientId, branchId>
+// The patient set produced here is the SINGLE source of truth for BOTH the
+// branch patient counts AND the branch financial figures: money is restricted
+// to these same patients in branchFinancialMap, so a deleted (archived)
+// registration drops out of BOTH Patients and Revenue/Paid/Due together.
+const registrationDataByBranch = async (range = {}) => {
   const rows = await Visit.aggregate([
     ...registrationStage,
     { $lookup: { from: 'patients', localField: '_id', foreignField: '_id', as: 'doc' } },
@@ -51,13 +58,25 @@ const registrationCountsByBranch = async (range = {}) => {
         patients: { $sum: 1 },
         clinic: { $sum: { $cond: [isHomeExpr, 0, 1] } },
         home: { $sum: { $cond: [isHomeExpr, 1, 0] } },
+        ids: { $push: '$_id' },
       },
     },
   ]);
-  const out = new Map();
-  rows.forEach((r) => out.set(r._id.toString(), { patients: r.patients, clinic: r.clinic, home: r.home }));
-  return out;
+  const counts = new Map();
+  const idsByBranch = new Map();
+  const attribution = new Map();
+  rows.forEach((r) => {
+    const key = r._id.toString();
+    counts.set(key, { patients: r.patients, clinic: r.clinic, home: r.home });
+    idsByBranch.set(key, r.ids);
+    r.ids.forEach((id) => attribution.set(id.toString(), key));
+  });
+  return { counts, idsByBranch, attribution };
 };
+
+// Counts per branch of ACTIVE registrations (optionally within a createdAt
+// window). Returns Map<branchId, { patients, clinic, home }>.
+const registrationCountsByBranch = async (range = {}) => (await registrationDataByBranch(range)).counts;
 
 // OBJECT IDs of active registrations attributed to one branch. The branch is
 // filtered on the attribution result (never pre-matched), so this set EXACTLY
@@ -75,4 +94,4 @@ const patientIdsByRegistrationBranch = async (branchId) => {
   return rows.map((r) => r._id);
 };
 
-module.exports = { registrationCountsByBranch, patientIdsByRegistrationBranch, HOME_CH };
+module.exports = { registrationCountsByBranch, registrationDataByBranch, patientIdsByRegistrationBranch, HOME_CH };

@@ -5,7 +5,7 @@ const HomeVisit = require('../../models/HomeVisit');
 const PaymentTransaction = require('../../models/PaymentTransaction');
 const Course = require('../../models/Course');
 const Branch = require('../../models/Branch');
-const { registrationCountsByBranch, patientIdsByRegistrationBranch } = require('../../utils/registrationBranch');
+const { registrationCountsByBranch, registrationDataByBranch, patientIdsByRegistrationBranch } = require('../../utils/registrationBranch');
 const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -60,16 +60,16 @@ const homePatientIds = async () => {
 const branchList = asyncHandler(async (req, res) => {
   const q = req.query;
   const range = parseRange(q.date || q.from, q.date || q.to);
-  const [counts, finances] = await Promise.all([
-    registrationCountsByBranch(range),
-    branchFinancialMap({
-      visitFilter: buildVisitFilter(q),
-      visitScope: {},
-      txFilter: buildTxFilter(q),
-      homeFilter: buildHomeVisitFilter(q),
-      chHome: false,
-    }),
-  ]);
+  const reg = await registrationDataByBranch(range);
+  const counts = reg.counts;
+  const finances = await branchFinancialMap({
+    visitFilter: buildVisitFilter(q),
+    visitScope: {},
+    txFilter: buildTxFilter(q),
+    homeFilter: buildHomeVisitFilter(q),
+    chHome: false,
+    attribution: reg.attribution,
+  });
   const branches = await Branch.find({ isActive: true }).sort({ order: 1, name: 1 });
   const rows = branches.map((b) => {
     const c = counts.get(b._id.toString()) || { patients: 0, clinic: 0, home: 0 };
@@ -177,16 +177,35 @@ const coveredByTransactions = async (txFilter) => {
   return { courses, visits };
 };
 
-const branchFinancialMap = async ({ visitFilter, visitScope, txFilter, homeFilter, chHome, coveredSets }) => {
-  const covered = coveredSets || (await coveredByTransactions(txFilter));
+const branchFinancialMap = async ({ visitFilter, visitScope, txFilter, homeFilter, chHome, coveredSets, attribution }) => {
+  // When `attribution` (Map<patientId, branchId>) is given — from the SAME
+  // registration ledgers used for the branch patient counts — every OP money
+  // source is restricted to those live registrations and attributed to the
+  // patient's REGISTRATION branch. One scope for Patients, Revenue, Paid, Due:
+  // an archived (deleted) registration drops out of all of them together, and
+  // a payment can never land on a different branch than its patient's.
+  const hasAttr = !!attribution && attribution.size > 0;
+  const patientIdsArr = hasAttr ? [...attribution.keys()].map((x) => new mongoose.Types.ObjectId(x)) : [];
+
+  const covered = coveredSets || (await coveredByTransactions(hasAttr ? { ...txFilter, patientId: { $in: patientIdsArr } } : txFilter));
+
+  const scopedPatient = (existing) => {
+    if (!hasAttr) return existing;
+    if (existing) return { $and: [existing, { $in: patientIdsArr }] };
+    return { $in: patientIdsArr };
+  };
+
+  const visitMatch = { ...visitFilter, ...(hasAttr || visitScope.patient ? { patient: scopedPatient(visitScope.patient) } : {}) };
 
   const legacyMatch = {
     ...visitFilter,
     'payment.advanced': { $gt: 0 },
     $or: [{ courseId: null }, { courseId: { $nin: covered.courses } }],
     _id: { $nin: covered.visits },
+    ...(hasAttr || visitScope.patient ? { patient: scopedPatient(visitScope.patient) } : {}),
   };
-  if (visitScope.patient) legacyMatch.patient = visitScope.patient;
+
+  const txMatch = hasAttr ? { ...txFilter, patientId: { $in: patientIdsArr } } : txFilter;
 
   const branchNames = {};
   (await Branch.find({ isActive: true }).select('name')).forEach((b) => (branchNames[b._id.toString()] = b.name));
@@ -212,33 +231,27 @@ const branchFinancialMap = async ({ visitFilter, visitScope, txFilter, homeFilte
 
   const [visitBranchBilled, legacyBranchAgg, txBranchAgg, homeBranchAgg] = await Promise.all([
     Visit.aggregate([
-      { $match: { ...visitFilter, ...visitScope } },
+      { $match: visitMatch },
       {
-        $group: {
-          _id: '$branch',
-          billed: { $sum: '$charges.total' },
-          patients: { $addToSet: '$patient' },
-        },
+        $group: hasAttr
+          ? { _id: '$patient', billed: { $sum: '$charges.total' } }
+          : { _id: '$branch', billed: { $sum: '$charges.total' }, patients: { $addToSet: '$patient' } },
       },
     ]),
     Visit.aggregate([
       { $match: legacyMatch },
       {
-        $group: {
-          _id: '$branch',
-          totalPaid: { $sum: '$payment.advanced' },
-          transactions: { $sum: 1 },
-        },
+        $group: hasAttr
+          ? { _id: '$patient', totalPaid: { $sum: '$payment.advanced' }, transactions: { $sum: 1 } }
+          : { _id: '$branch', totalPaid: { $sum: '$payment.advanced' }, transactions: { $sum: 1 } },
       },
     ]),
     PaymentTransaction.aggregate([
-      { $match: txFilter },
+      { $match: txMatch },
       {
-        $group: {
-          _id: '$branchId',
-          revenue: { $sum: '$amount' },
-          transactions: { $sum: 1 },
-        },
+        $group: hasAttr
+          ? { _id: '$patientId', revenue: { $sum: '$amount' }, transactions: { $sum: 1 } }
+          : { _id: '$branchId', revenue: { $sum: '$amount' }, transactions: { $sum: 1 } },
       },
     ]),
     HomeVisit.aggregate([
@@ -254,30 +267,82 @@ const branchFinancialMap = async ({ visitFilter, visitScope, txFilter, homeFilte
     ]),
   ]);
 
-  visitBranchBilled.forEach((r) => {
-    putBranch(r._id, { totalBilled: Math.round(r.billed * 100) / 100, clinicPatients: r.patients.length, totalPatients: r.patients.length });
-  });
-  legacyBranchAgg.forEach((r) => {
-    const key = r._id ? r._id.toString() : 'none';
-    putBranch(r._id, { totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100, transactions: (branchById[key]?.transactions || 0) + r.transactions });
-  });
-  txBranchAgg.forEach((r) => {
-    const key = r._id ? r._id.toString() : 'none';
-    putBranch(r._id, { totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.revenue * 100) / 100, transactions: (branchById[key]?.transactions || 0) + r.transactions });
-  });
-  homeBranchAgg.forEach((r) => {
-    const key = r._id ? r._id.toString() : 'none';
-    putBranch(r._id, {
-      totalBilled: (branchById[key]?.totalBilled || 0) + Math.round(r.totalBilled * 100) / 100,
-      totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100,
-      transactions: (branchById[key]?.transactions || 0) + r.transactions,
-      homeVisits: (branchById[key]?.homeVisits || 0) + r.transactions,
+  if (hasAttr) {
+    // Attribute every OP rupee to the patient's registration branch, keeping
+    // the exact same patient set that produced the branch patient counts.
+    const billedByBranch = new Map();
+    const paidByBranch = new Map();
+    const transByBranch = new Map();
+    const patSetByBranch = new Map();
+    const add = (map, key, n) => map.set(key, (map.get(key) || 0) + n);
+
+    visitBranchBilled.forEach((r) => {
+      const br = r._id && attribution.get(r._id.toString());
+      if (!br) return;
+      add(billedByBranch, br, r.billed || 0);
+      if (!patSetByBranch.has(br)) patSetByBranch.set(br, new Set());
+      patSetByBranch.get(br).add(r._id.toString());
     });
-    if (chHome) {
-      branchById[key].clinicPatients = 0;
-      branchById[key].totalPatients = r.transactions;
-    }
-  });
+    legacyBranchAgg.forEach((r) => {
+      const br = r._id && attribution.get(r._id.toString());
+      if (!br) return;
+      add(paidByBranch, br, r.totalPaid || 0);
+      add(transByBranch, br, r.transactions || 0);
+    });
+    txBranchAgg.forEach((r) => {
+      const br = r._id && attribution.get(r._id.toString());
+      if (!br) return;
+      add(paidByBranch, br, r.revenue || 0);
+      add(transByBranch, br, r.transactions || 0);
+    });
+
+    new Set([...billedByBranch.keys(), ...paidByBranch.keys()]).forEach((br) => {
+      putBranch(br, {
+        totalBilled: Math.round((billedByBranch.get(br) || 0) * 100) / 100,
+        totalPaid: Math.round((paidByBranch.get(br) || 0) * 100) / 100,
+        transactions: transByBranch.get(br) || 0,
+        clinicPatients: patSetByBranch.get(br)?.size || 0,
+        totalPatients: patSetByBranch.get(br)?.size || 0,
+      });
+    });
+
+    // Standalone Home Visit documents carry no patient reference (linked by
+    // name), so they stay branch/date-scoped as-is.
+    homeBranchAgg.forEach((r) => {
+      const key = r._id ? r._id.toString() : 'none';
+      putBranch(r._id, {
+        totalBilled: (branchById[key]?.totalBilled || 0) + Math.round(r.totalBilled * 100) / 100,
+        totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100,
+        transactions: (branchById[key]?.transactions || 0) + r.transactions,
+        homeVisits: (branchById[key]?.homeVisits || 0) + r.transactions,
+      });
+    });
+  } else {
+    visitBranchBilled.forEach((r) => {
+      putBranch(r._id, { totalBilled: Math.round(r.billed * 100) / 100, clinicPatients: r.patients.length, totalPatients: r.patients.length });
+    });
+    legacyBranchAgg.forEach((r) => {
+      const key = r._id ? r._id.toString() : 'none';
+      putBranch(r._id, { totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100, transactions: (branchById[key]?.transactions || 0) + r.transactions });
+    });
+    txBranchAgg.forEach((r) => {
+      const key = r._id ? r._id.toString() : 'none';
+      putBranch(r._id, { totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.revenue * 100) / 100, transactions: (branchById[key]?.transactions || 0) + r.transactions });
+    });
+    homeBranchAgg.forEach((r) => {
+      const key = r._id ? r._id.toString() : 'none';
+      putBranch(r._id, {
+        totalBilled: (branchById[key]?.totalBilled || 0) + Math.round(r.totalBilled * 100) / 100,
+        totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100,
+        transactions: (branchById[key]?.transactions || 0) + r.transactions,
+        homeVisits: (branchById[key]?.homeVisits || 0) + r.transactions,
+      });
+      if (chHome) {
+        branchById[key].clinicPatients = 0;
+        branchById[key].totalPatients = r.transactions;
+      }
+    });
+  }
 
   Object.values(branchById).forEach((b) => {
     b.totalDue = Math.max(0, Math.round((b.totalBilled - b.totalPaid) * 100) / 100);
