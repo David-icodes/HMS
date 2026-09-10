@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Building2, Users, ArrowLeft, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Building2, Users, ArrowLeft, RotateCcw, ChevronLeft, ChevronRight, IndianRupee, Wallet, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminFetch } from '@/lib/admin-auth';
 
@@ -12,6 +12,10 @@ interface BranchRow {
   patients: number;
   clinicPatients: number;
   homePatients: number;
+  billed: number;
+  paid: number;
+  due: number;
+  balance: number;
 }
 
 interface RegistrationRow {
@@ -37,6 +41,11 @@ interface BranchDetail {
 }
 
 const inputCls = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-sky-500 focus:outline-none';
+
+const fmtMoney = (n: number | undefined): string => {
+  const v = Math.round((Number(n) || 0) * 100) / 100;
+  return v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+};
 
 export default function AdminBranchReportsPage() {
   const [rows, setRows] = useState<BranchRow[]>([]);
@@ -204,7 +213,9 @@ export default function AdminBranchReportsPage() {
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center">
-        <p className="text-sm text-slate-500">Patients per branch come from actual Patient registrations. Select a branch to view its registered patients.</p>
+        <p className="text-sm text-slate-500">
+          Patients are actual registrations. Revenue/Billed comes from billing (a course is billed once), Paid from valid payments, Due = Billed − Paid (never negative).
+        </p>
         <div className="flex flex-1 flex-wrap items-center gap-2 lg:justify-end">
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
@@ -224,19 +235,27 @@ export default function AdminBranchReportsPage() {
             <button
               key={b._id}
               onClick={() => { setBranchPage(1); void openBranch(b._id); }}
-              className="group rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/40"
+              className="group flex flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/40"
             >
               <div className="flex items-start justify-between">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-50 text-sky-600 group-hover:bg-sky-100">
                   <Building2 className="h-5 w-5" />
                 </div>
                 <span className="rounded-md bg-sky-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
-                  {b.patients.toLocaleString()} patients
+                  {b.patients.toLocaleString()} Patients
                 </span>
               </div>
               <p className="mt-3 text-base font-bold text-slate-900">{b.name}</p>
               <p className="text-xs text-slate-400">{b.area || '—'}</p>
-              <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
+
+              <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+                <Money label="Revenue" value={b.billed} icon={IndianRupee} tone="sky" />
+                <Money label="Paid" value={b.paid} icon={Wallet} tone="emerald" />
+                <Money label="Due" value={b.due} icon={AlertTriangle} tone={b.due > 0 ? 'rose' : 'slate'} />
+                <Money label="Balance" value={b.balance} icon={Wallet} tone="violet" />
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
                 <span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">
                   {b.clinicPatients} Clinic
                 </span>
@@ -272,6 +291,24 @@ function Stat({ label, value, icon: Icon, tone }: { label: string; value: string
         <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${tones[tone]}`}><Icon className="h-4 w-4" /></div>
       </div>
       <p className="mt-2 text-xl font-bold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function Money({ label, value, icon: Icon, tone }: { label: string; value: number; icon: typeof Wallet; tone: 'sky' | 'emerald' | 'rose' | 'violet' | 'slate' }) {
+  const tones: Record<string, string> = {
+    sky: 'bg-sky-50 text-sky-600',
+    emerald: 'bg-emerald-50 text-emerald-600',
+    rose: 'bg-rose-50 text-rose-600',
+    violet: 'bg-violet-50 text-violet-600',
+    slate: 'bg-slate-100 text-slate-600',
+  };
+  return (
+    <div className="rounded-lg bg-slate-50/60 px-3 py-2">
+      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        <Icon className="h-3 w-3" /> {label}
+      </p>
+      <p className={`mt-0.5 text-sm font-bold ${tones[tone].split(' ')[1]}`}>₹{fmtMoney(value)}</p>
     </div>
   );
 }

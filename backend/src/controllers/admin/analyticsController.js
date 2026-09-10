@@ -50,18 +50,30 @@ const homePatientIds = async () => {
   return ids;
 };
 
-// ---------- Branch list: patients per branch from registration records ----------
+// ---------- Branch list: patients + finances per branch ----------
 // Branch patient counts come from the canonical Patient registration ledger
 // attributed to the branch of each registration (first New OP visit). Visit,
 // follow-up, course-day and payment records never multiply these counts, and an
-// archived (deleted) registration drops out immediately.
+// archived (deleted) registration drops out immediately. Financial figures come
+// from the shared branchFinancialMap (billed once per course, paid = actual valid
+// payments), so a card always reflects the current database state after refetch.
 const branchList = asyncHandler(async (req, res) => {
   const q = req.query;
   const range = parseRange(q.date || q.from, q.date || q.to);
-  const counts = await registrationCountsByBranch(range);
+  const [counts, finances] = await Promise.all([
+    registrationCountsByBranch(range),
+    branchFinancialMap({
+      visitFilter: buildVisitFilter(q),
+      visitScope: {},
+      txFilter: buildTxFilter(q),
+      homeFilter: buildHomeVisitFilter(q),
+      chHome: false,
+    }),
+  ]);
   const branches = await Branch.find({ isActive: true }).sort({ order: 1, name: 1 });
   const rows = branches.map((b) => {
     const c = counts.get(b._id.toString()) || { patients: 0, clinic: 0, home: 0 };
+    const f = finances[b._id.toString()] || { totalBilled: 0, totalPaid: 0, totalDue: 0, totalBalance: 0 };
     return {
       _id: b._id,
       name: b.name,
@@ -69,6 +81,10 @@ const branchList = asyncHandler(async (req, res) => {
       patients: c.patients,
       clinicPatients: c.clinic,
       homePatients: c.home,
+      billed: f.totalBilled,
+      paid: f.totalPaid,
+      due: f.totalDue,
+      balance: f.totalBalance,
     };
   });
 
@@ -144,6 +160,133 @@ const buildTxFilter = (q) => {
   return filter;
 };
 
+// ---------- Branch-level financial aggregation ----------
+// The SINGLE canonical calculation for both the Revenue page branch table and the
+// Branch Reports cards. Every number below is derived from the same records the
+// rest of finance uses — never from patient/visit/course-day counts:
+//   billed = actual Visit/HomeVisit charges (a course is billed ONCE, on its day-1
+//            visit; follow-up days are ₹0), optionally within the visit date scope;
+//   paid   = ACTUAL money received: valid PaymentTransactions (+ legacy OP advances
+//            not covered by any transaction + Home Visit advances), paymentDate scope;
+//   due    = MAX(billed − paid, 0)  and  balance = MAX(paid − billed, 0), per branch.
+const coveredByTransactions = async (txFilter) => {
+  const [courses, visits] = await Promise.all([
+    PaymentTransaction.distinct('courseId', { ...txFilter, courseId: { $ne: null } }),
+    PaymentTransaction.distinct('visitId', { ...txFilter, visitId: { $ne: null } }),
+  ]);
+  return { courses, visits };
+};
+
+const branchFinancialMap = async ({ visitFilter, visitScope, txFilter, homeFilter, chHome, coveredSets }) => {
+  const covered = coveredSets || (await coveredByTransactions(txFilter));
+
+  const legacyMatch = {
+    ...visitFilter,
+    'payment.advanced': { $gt: 0 },
+    $or: [{ courseId: null }, { courseId: { $nin: covered.courses } }],
+    _id: { $nin: covered.visits },
+  };
+  if (visitScope.patient) legacyMatch.patient = visitScope.patient;
+
+  const branchNames = {};
+  (await Branch.find({ isActive: true }).select('name')).forEach((b) => (branchNames[b._id.toString()] = b.name));
+
+  const branchById = {};
+  const putBranch = (id, patch) => {
+    const key = id ? id.toString() : 'none';
+    if (!branchById[key]) {
+      branchById[key] = {
+        branchId: id,
+        branchName: (id && branchNames[id.toString()]) || 'Unassigned',
+        totalBilled: 0,
+        totalPaid: 0,
+        totalDue: 0,
+        transactions: 0,
+        clinicPatients: 0,
+        homeVisits: 0,
+        totalPatients: 0,
+      };
+    }
+    Object.assign(branchById[key], patch);
+  };
+
+  const [visitBranchBilled, legacyBranchAgg, txBranchAgg, homeBranchAgg] = await Promise.all([
+    Visit.aggregate([
+      { $match: { ...visitFilter, ...visitScope } },
+      {
+        $group: {
+          _id: '$branch',
+          billed: { $sum: '$charges.total' },
+          patients: { $addToSet: '$patient' },
+        },
+      },
+    ]),
+    Visit.aggregate([
+      { $match: legacyMatch },
+      {
+        $group: {
+          _id: '$branch',
+          totalPaid: { $sum: '$payment.advanced' },
+          transactions: { $sum: 1 },
+        },
+      },
+    ]),
+    PaymentTransaction.aggregate([
+      { $match: txFilter },
+      {
+        $group: {
+          _id: '$branchId',
+          revenue: { $sum: '$amount' },
+          transactions: { $sum: 1 },
+        },
+      },
+    ]),
+    HomeVisit.aggregate([
+      { $match: homeFilter },
+      {
+        $group: {
+          _id: '$branch',
+          totalBilled: { $sum: { $ifNull: ['$total', { $multiply: [{ $ifNull: ['$perSession', 0] }, { $ifNull: ['$sessions', 1] }] }] } },
+          totalPaid: { $sum: { $ifNull: ['$advance', 0] } },
+          transactions: { $sum: 1 },
+        },
+      },
+    ]),
+  ]);
+
+  visitBranchBilled.forEach((r) => {
+    putBranch(r._id, { totalBilled: Math.round(r.billed * 100) / 100, clinicPatients: r.patients.length, totalPatients: r.patients.length });
+  });
+  legacyBranchAgg.forEach((r) => {
+    const key = r._id ? r._id.toString() : 'none';
+    putBranch(r._id, { totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100, transactions: (branchById[key]?.transactions || 0) + r.transactions });
+  });
+  txBranchAgg.forEach((r) => {
+    const key = r._id ? r._id.toString() : 'none';
+    putBranch(r._id, { totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.revenue * 100) / 100, transactions: (branchById[key]?.transactions || 0) + r.transactions });
+  });
+  homeBranchAgg.forEach((r) => {
+    const key = r._id ? r._id.toString() : 'none';
+    putBranch(r._id, {
+      totalBilled: (branchById[key]?.totalBilled || 0) + Math.round(r.totalBilled * 100) / 100,
+      totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100,
+      transactions: (branchById[key]?.transactions || 0) + r.transactions,
+      homeVisits: (branchById[key]?.homeVisits || 0) + r.transactions,
+    });
+    if (chHome) {
+      branchById[key].clinicPatients = 0;
+      branchById[key].totalPatients = r.transactions;
+    }
+  });
+
+  Object.values(branchById).forEach((b) => {
+    b.totalDue = Math.max(0, Math.round((b.totalBilled - b.totalPaid) * 100) / 100);
+    b.totalBalance = Math.max(0, Math.round((b.totalPaid - b.totalBilled) * 100) / 100);
+    b.totalPatients = b.clinicPatients + b.homeVisits;
+  });
+  return branchById;
+};
+
 const revenueReport = asyncHandler(async (req, res) => {
   const q = req.query;
   // Clinic-Home filter is patient-based and disjoint:
@@ -168,21 +311,10 @@ const revenueReport = asyncHandler(async (req, res) => {
   const visitScope = chHome ? { patient: { $in: homeIds } } : chClinic ? { patient: { $nin: homeIds } } : {};
 
   // Money already captured by PaymentTransactions (attribute once to that ledger).
-  const [txSummary, txBranchAgg, txMethodAgg, coveredSets] = await Promise.all([
+  const [txSummary, txMethodAgg, coveredSets] = await Promise.all([
     PaymentTransaction.aggregate([
       { $match: txFilter },
       { $group: { _id: null, revenue: { $sum: '$amount' }, transactions: { $sum: 1 } } },
-    ]),
-    PaymentTransaction.aggregate([
-      { $match: txFilter },
-      {
-        $group: {
-          _id: '$branchId',
-          revenue: { $sum: '$amount' },
-          transactions: { $sum: 1 },
-          patients: { $addToSet: '$patientId' },
-        },
-      },
     ]),
     PaymentTransaction.aggregate([
       { $match: txFilter },
@@ -216,7 +348,7 @@ const revenueReport = asyncHandler(async (req, res) => {
     _id: { $nin: coveredSets.visits },
   };
   if (chKey) legacyMatch.patient = visitScope.patient;
-  const [legacySummary, legacyBranchAgg, legacyMethodAgg] = await Promise.all([
+  const [legacySummary, legacyMethodAgg] = await Promise.all([
     Visit.aggregate([
       { $match: legacyMatch },
       {
@@ -227,19 +359,6 @@ const revenueReport = asyncHandler(async (req, res) => {
           totalDue: { $sum: '$payment.due' },
           transactions: { $sum: 1 },
           totalPatients: { $addToSet: '$patient' },
-        },
-      },
-    ]),
-    Visit.aggregate([
-      { $match: legacyMatch },
-      {
-        $group: {
-          _id: '$branch',
-          totalBilled: { $sum: '$charges.total' },
-          totalPaid: { $sum: '$payment.advanced' },
-          totalDue: { $sum: '$payment.due' },
-          transactions: { $sum: 1 },
-          patients: { $addToSet: '$patient' },
         },
       },
     ]),
@@ -278,25 +397,13 @@ const revenueReport = asyncHandler(async (req, res) => {
 
   // Home Visits: actual money received (advance), billed (total), counted once.
   const homeMatch = chClinic ? { ...homeFilter, _id: { $in: [] } } : homeFilter;
-  const [homeSummary, homeBranchAgg, homeMethodAgg] = await Promise.all([
+  const [homeSummary, homeMethodAgg] = await Promise.all([
     HomeVisit.aggregate([
       { $match: homeMatch },
       {
         $group: {
           _id: null,
           totalBilled: { $sum: { $ifNull: ['$total', { $multiply: [{ $ifNull: ['$perSession', 0] }, { $ifNull: ['$sessions', 1] }] }] } },
-          totalPaid: { $sum: { $ifNull: ['$advance', 0] } },
-          totalDue: { $sum: { $ifNull: ['$due', 0] } },
-          transactions: { $sum: 1 },
-        },
-      },
-    ]),
-    HomeVisit.aggregate([
-      { $match: homeMatch },
-      {
-        $group: {
-          _id: '$branch',
-          totalBilled: { $sum: { $ifNull: ['$total', 0] } },
           totalPaid: { $sum: { $ifNull: ['$advance', 0] } },
           totalDue: { $sum: { $ifNull: ['$due', 0] } },
           transactions: { $sum: 1 },
@@ -460,69 +567,15 @@ const revenueReport = asyncHandler(async (req, res) => {
   const totalTransactions = (txS.transactions || 0) + (legS.transactions || 0) + (homeS.transactions || 0);
 
   // ---- Branch rows ----
-  const branchNames = {};
-  (await Branch.find({ isActive: true }).select('name')).forEach((b) => (branchNames[b._id.toString()] = b.name));
-
-  const branchById = {};
-  const putBranch = (id, patch) => {
-    const key = id ? id.toString() : 'none';
-    if (!branchById[key]) {
-      branchById[key] = {
-        branchId: id,
-        branchName: (id && branchNames[id.toString()]) || 'Unassigned',
-        totalBilled: 0,
-        totalPaid: 0,
-        totalDue: 0,
-        transactions: 0,
-        clinicPatients: 0,
-        homeVisits: 0,
-        totalPatients: 0,
-      };
-    }
-    Object.assign(branchById[key], patch);
-  };
-  // OP billed + legacy paid + clinic patient counts.
-  const visitBranchBilled = await Visit.aggregate([
-    { $match: { ...filter, ...visitScope } },
-    {
-      $group: {
-        _id: '$branch',
-        billed: { $sum: '$charges.total' },
-        patients: { $addToSet: '$patient' },
-      },
-    },
-  ]);
-  visitBranchBilled.forEach((r) => {
-    putBranch(r._id, { totalBilled: Math.round(r.billed * 100) / 100, clinicPatients: r.patients.length, totalPatients: r.patients.length });
+  const branchById = await branchFinancialMap({
+    visitFilter: filter,
+    visitScope,
+    txFilter,
+    homeFilter,
+    chHome,
+    coveredSets,
   });
-
-  legacyBranchAgg.forEach((r) => {
-    const key = r._id ? r._id.toString() : 'none';
-    putBranch(r._id, { totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100, transactions: (branchById[key]?.transactions || 0) + r.transactions });
-  });
-  txBranchAgg.forEach((r) => {
-    putBranch(r._id, { totalPaid: (branchById[r._id ? r._id.toString() : 'none']?.totalPaid || 0) + Math.round(r.revenue * 100) / 100, transactions: (branchById[r._id ? r._id.toString() : 'none']?.transactions || 0) + r.transactions });
-  });
-  homeBranchAgg.forEach((r) => {
-    const key = r._id ? r._id.toString() : 'none';
-    putBranch(r._id, {
-      totalBilled: (branchById[key]?.totalBilled || 0) + Math.round(r.totalBilled * 100) / 100,
-      totalPaid: (branchById[key]?.totalPaid || 0) + Math.round(r.totalPaid * 100) / 100,
-      totalDue: Math.max(0, Math.round(r.totalDue * 100) / 100),
-      transactions: (branchById[key]?.transactions || 0) + r.transactions,
-      homeVisits: (branchById[key]?.homeVisits || 0) + r.transactions,
-    });
-    if (chHome) {
-      branchById[key].clinicPatients = 0;
-      branchById[key].totalPatients = r.transactions;
-    }
-  });
-  const branchRows = Object.values(branchById).map((b) => ({
-    ...b,
-    totalDue: Math.max(0, Math.round((b.totalBilled - b.totalPaid) * 100) / 100),
-    totalBalance: Math.max(0, Math.round((b.totalPaid - b.totalBilled) * 100) / 100),
-    totalPatients: b.clinicPatients + b.homeVisits,
-  }));
+  const branchRows = Object.values(branchById);
 
   // ---- Method rows ----
   const methodById = {};
