@@ -50,6 +50,50 @@ const homePatientIds = async () => {
   return ids;
 };
 
+// A revenue view's PATIENT figure = the number of VALID (non-archived) Patient
+// REGISTRATION records in scope, using the exact same ledger and branch
+// attribution as the Admin Patients list and the Branch Reports cards:
+//   date   = patient.createdAt (the registration date), never visit/payment dates;
+//   branch = the registration branch attribution (a follow-up/course-day never
+//            moves a patient to another branch);
+//   ch     = the patient's own Clinic/Home classification.
+// Follow-up visits, course days, payments and transactions NEVER add patients.
+const registrationMatch = async (range, branch, ch) => {
+  const match = { isArchived: { $ne: true } };
+  if (range.$gte || range.$lte) match.createdAt = range;
+  if (ch === 'home') match.cH = HOME_CH_RE;
+  else if (ch === 'clinic') match.cH = { $not: HOME_CH_RE };
+  if (branch && mongoose.isValidObjectId(branch)) {
+    match._id = { $in: await patientIdsByRegistrationBranch(branch) };
+  }
+  return match;
+};
+
+const isHomePatientAgg = { $in: [{ $toLower: { $trim: { input: { $ifNull: ['$cH', ''] } } } }, ['home']] };
+
+// Per-day patient-registration counts for a revenue date scope (same semantics
+// as registrationMatch, grouped by the registration's local day).
+const registrationByDay = async (range, branch, ch) => {
+  const match = { isArchived: { $ne: true } };
+  if (range.$gte || range.$lte) match.createdAt = range;
+  if (ch === 'home') match.cH = HOME_CH_RE;
+  else if (ch === 'clinic') match.cH = { $not: HOME_CH_RE };
+  if (branch && mongoose.isValidObjectId(branch)) {
+    match._id = { $in: await patientIdsByRegistrationBranch(branch) };
+  }
+  return Patient.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' } },
+        patients: { $sum: 1 },
+        clinic: { $sum: { $cond: [isHomePatientAgg, 0, 1] } },
+        home: { $sum: { $cond: [isHomePatientAgg, 1, 0] } },
+      },
+    },
+  ]);
+};
+
 // ---------- Branch list: patients + finances per branch ----------
 // Branch patient counts come from the canonical Patient registration ledger
 // attributed to the branch of each registration (first New OP visit). Visit,
@@ -444,20 +488,14 @@ const revenueReport = asyncHandler(async (req, res) => {
 
   // OP billing (all visits matching the filter) — courses bill exactly once (day 1),
   // follow-ups are ₹0, additional charges add in only when explicitly billed.
-  const [visitBilledAgg, visitPatientsAgg] = await Promise.all([
-    Visit.aggregate([
-      { $match: { ...filter, ...visitScope } },
-      {
-        $group: {
-          _id: null,
-          totalBilled: { $sum: '$charges.total' },
-        },
+  const visitBilledAgg = await Visit.aggregate([
+    { $match: { ...filter, ...visitScope } },
+    {
+      $group: {
+        _id: null,
+        totalBilled: { $sum: '$charges.total' },
       },
-    ]),
-    Visit.aggregate([
-      { $match: { ...filter, ...visitScope } },
-      { $group: { _id: null, patients: { $addToSet: '$patient' } } },
-    ]),
+    },
   ]);
 
   // Home Visits: actual money received (advance), billed (total), counted once.
@@ -585,43 +623,11 @@ const revenueReport = asyncHandler(async (req, res) => {
   const legS = legacySummary[0] || {};
   const homeS = homeSummary[0] || {};
   const billedFromVisits = visitBilledAgg[0]?.totalBilled || 0;
-  let totalPatients = (visitPatientsAgg[0]?.patients || []).length;
-  if (chHome) {
-    // Home view: distinct patients from home-patient visits + home transactions
-    // (legacy standalone HomeVisit documents are counted as Home Visits, not patients).
-    const [homeVisitPatients, homeTxPatients] = await Promise.all([
-      Visit.aggregate([
-        { $match: { ...filter, patient: { $in: homeIds } } },
-        { $group: { _id: null, patients: { $addToSet: '$patient' } } },
-      ]),
-      PaymentTransaction.aggregate([
-        { $match: { ...txFilter, patientId: { $ne: null } } },
-        { $group: { _id: null, patients: { $addToSet: '$patientId' } } },
-      ]),
-    ]);
-    const set = new Set([
-      ...(homeVisitPatients[0]?.patients || []).map(String),
-      ...(homeTxPatients[0]?.patients || []).map(String),
-    ]);
-    totalPatients = set.size;
-  } else if (chClinic) {
-    // Clinic view: distinct patients from clinic visits plus clinic transactions.
-    const clinicTxPatients = await PaymentTransaction.aggregate([
-      { $match: { ...txFilter, patientId: { $ne: null } } },
-      { $group: { _id: null, patients: { $addToSet: '$patientId' } } },
-    ]);
-    const set = new Set([...(visitPatientsAgg[0]?.patients || []).map(String), ...(clinicTxPatients[0]?.patients || []).map(String)]);
-    totalPatients = set.size;
-  } else {
-    const allTxPatients = await PaymentTransaction.aggregate([
-      { $match: { ...txFilter, patientId: { $ne: null } } },
-      { $group: { _id: null, patients: { $addToSet: '$patientId' } } },
-    ]);
-    totalPatients = new Set([
-      ...(visitPatientsAgg[0]?.patients || []).map(String),
-      ...(allTxPatients[0]?.patients || []).map(String),
-    ]).size;
-  }
+  // Patients = patient REGISTRATION records in scope (never patients-in-visits:
+  // a follow-up/course-day/payment must not add a patient). Excludes archived.
+  const totalPatients = await Patient.countDocuments(
+    await registrationMatch(parseRange(q.date || q.from, q.date || q.to), q.branch, chHome ? 'home' : chClinic ? 'clinic' : '')
+  );
 
   const totalBilled = Math.max(0, Math.round((billedFromVisits + (homeS.totalBilled || 0)) * 100) / 100);
   const totalPaid = Math.max(0, Math.round(((txS.revenue || 0) + (legS.totalPaid || 0) + (homeS.totalPaid || 0)) * 100) / 100);
@@ -632,6 +638,12 @@ const revenueReport = asyncHandler(async (req, res) => {
   const totalTransactions = (txS.transactions || 0) + (legS.transactions || 0) + (homeS.transactions || 0);
 
   // ---- Branch rows ----
+  // OP money is attributed to each patient's REGISTRATION branch (the same
+  // all-time live-registration set as the Branch Reports cards), so an archived
+  // registration drops out of money AND patients together, and a payment can
+  // never land on a different branch than its patient's. Activity date-scoping
+  // still comes from the visit/payment filters.
+  const { attribution } = await registrationDataByBranch();
   const branchById = await branchFinancialMap({
     visitFilter: filter,
     visitScope,
@@ -639,8 +651,21 @@ const revenueReport = asyncHandler(async (req, res) => {
     homeFilter,
     chHome,
     coveredSets,
+    attribution,
   });
   const branchRows = Object.values(branchById);
+  // The Patients / Clinic / Home figures on every branch row are REGISTRATION
+  // counts (the same ledger as the Branch Reports cards), never "patients who
+  // happened to pay in this scope". Money fields stay untouched.
+  const regCounts = (await registrationDataByBranch(parseRange(q.date || q.from, q.date || q.to))).counts;
+  branchRows.forEach((b) => {
+    const rc = regCounts.get(b.branchId ? b.branchId.toString() : 'none');
+    const clinic = rc?.clinic ?? 0;
+    const home = rc?.home ?? 0;
+    b.clinicPatients = chHome ? 0 : clinic;
+    b.homeVisits = chClinic ? 0 : home;
+    b.totalPatients = chHome ? home : chClinic ? clinic : rc?.patients ?? 0;
+  });
 
   // ---- Method rows ----
   const methodById = {};
@@ -724,12 +749,20 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
   const visitRange = parseRange(q.date || q.from, q.date || q.to);
   const homeRange = parseRange(q.date || q.from, q.date || q.to);
 
+  // Patients shown per row / in the summary = patient REGISTRATION records grouped
+  // by their local registration day (same ledger as the dashboard Today's Patients
+  // card and the Branch Reports cards). Follow-ups may bill ₹0 and payments may
+  // occur, but neither ever adds a patient.
+  const regDays = await registrationByDay(homeRange, q.branch, chHome ? 'home' : chClinic ? 'clinic' : '');
+  const regDayMap = {};
+  regDays.forEach((r) => (regDayMap[r._id] = r));
+
   // What dates should we enumerate? If a single date (date or from==to) -> 1 day.
   // Else enumerate every day between from..to.
   const daySet = new Map();
   const addDay = (iso) => {
     if (!daySet.has(iso)) {
-      daySet.set(iso, { date: iso, billed: 0, received: 0, transactions: 0, patients: new Set(), billedClinic: 0, billedHome: 0 });
+      daySet.set(iso, { date: iso, billed: 0, received: 0, transactions: 0, patients: 0, clinicPatients: 0, homeVisits: 0 });
     }
   };
 
@@ -863,6 +896,7 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
     ...Object.keys(txMap),
     ...Object.keys(legacyMap),
     ...Object.keys(homeMap),
+    ...Object.keys(regDayMap),
     ...daySet.keys(),
   ]);
   allDates.forEach((d) => addDay(d));
@@ -877,6 +911,7 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
     const tx = txMap[d];
     const leg = legacyMap[d];
     const hm = homeMap[d];
+    const reg = regDayMap[d] || { patients: 0, clinic: 0, home: 0 };
 
     const billed = (cb?.billed || 0) + (hb?.billed || 0) + (hm?.billed || 0);
     const received = (tx?.received || 0) + (leg?.received || 0) + (hm?.advance || 0);
@@ -885,12 +920,9 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
     r.billed = Math.round(billed * 100) / 100;
     r.received = Math.round(received * 100) / 100;
     r.transactions = transactions;
-    (cb?.patients || []).forEach((p) => r.patients.add(p.toString()));
-    (hb?.patients || []).forEach((p) => r.patients.add(p.toString()));
-    (tx?.patients || []).forEach((p) => r.patients.add(p.toString()));
-    (hm?.homePatients || []).forEach((p) => r.patients.add(`hv:${p}`));
-    r.billedClinic = (cb?.patients || []).length;
-    r.billedHome = (hb?.patients || []).length + (hm?.transactions || 0);
+    r.patients = reg.patients || 0;
+    r.clinicPatients = reg.clinic || 0;
+    r.homeVisits = reg.home || 0;
 
     cumBilled += r.billed;
     cumReceived += r.received;
@@ -901,9 +933,9 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
       received: r.received,
       due: Math.round(Math.max(0, cumBilled - cumReceived) * 100) / 100,
       balance: Math.round(Math.max(0, cumReceived - cumBilled) * 100) / 100,
-      patients: r.patients.size,
-      clinicPatients: r.billedClinic,
-      homeVisits: r.billedHome,
+      patients: r.patients,
+      clinicPatients: r.clinicPatients,
+      homeVisits: r.homeVisits,
       transactions: r.transactions,
       cumBilled: Math.round(cumBilled * 100) / 100,
       cumReceived: Math.round(cumReceived * 100) / 100,
@@ -922,11 +954,9 @@ const dayWiseRevenue = asyncHandler(async (req, res) => {
         totalReceived: Math.round(totalReceived * 100) / 100,
         totalDue: last ? last.due : 0,
         totalBalance: last ? last.balance : 0,
-        totalPatients: new Set([
-          ...Object.values(clinicBilledMap).flatMap((r) => (r.patients || []).map((p) => p.toString())),
-          ...Object.values(homeVisitBilledMap).flatMap((r) => (r.patients || []).map((p) => p.toString())),
-          ...Object.values(txMap).flatMap((r) => (r.patients || []).map((p) => p.toString())),
-        ]).size,
+        // Distinct patient REGISTRATIONS in the entire date scope (each patient
+        // has exactly one registration day, so this equals SUM(row patients)).
+        totalPatients: regDays.reduce((a, r) => a + (r.patients || 0), 0),
         totalTransactions: rows.reduce((a, r) => a + r.transactions, 0),
         startDate: startStr || null,
         endDate: endStr || null,
