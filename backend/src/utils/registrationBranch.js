@@ -5,28 +5,37 @@ const Patient = require('../models/Patient');
 // Canonical branch attribution for a patient registration.
 //
 // A Patient record is ONE registration. The branch where that registration
-// happened is the branch of the patient's chronologically first "New OP" visit
-// (the registration visit). This single attribution is the source of truth for
-// BOTH the Admin Patients branch filter and the Branch Reports patient counts,
-// so the two views always agree: a new registration increments the branch count,
-// an archived (deleted) registration drops out of both, and follow-ups / course
-// days / payments / visits never multiply the count.
+// happened is the branch of the patient's earliest visit that carries a branch
+// (the registration visit), PREFERRING a "New OP" visit when one exists so an
+// early admin recording / follow-up at a first branch never misattributes a
+// patient whose real registration visit is a later New OP. This single
+// attribution is the source of truth for BOTH the Admin Patients branch filter
+// and the Branch Reports patient counts, so the two views always agree: a new
+// registration increments the branch count, an archived (deleted) registration
+// drops out of both, and follow-ups / course days / payments / visits never
+// multiply the count.
 
 const HOME_CH = /^\s*home\s*$/i;
 
-// The visit that created the registration: the chronologically FIRST "New OP"
-// visit of the patient that carries a branch. Grouped GLOBALLY (no branch pre-
-// filter) so the $first is truly the registration visit — a later New OP at a
-// different branch never re-attributes the patient.
+// The visit that created the registration: the earliest visit of the patient
+// carrying a branch. "New OP" visits rank first so the true registration visit
+// wins over an earlier stray Follow-up; among equal ranks the chronologically
+// earliest wins. Grouped GLOBALLY (no branch pre-filter) so the $first is truly
+// the registration visit — a later visit at a different branch never re-
+// attributes the patient.
 const registrationStage = [
   {
     $match: {
-      visitType: 'New OP',
       branch: { $ne: null },
       patient: { $ne: null },
     },
   },
-  { $sort: { createdAt: 1, _id: 1 } },
+  {
+    $addFields: {
+      __regPrio: { $cond: [{ $eq: ['$visitType', 'New OP'] }, 0, 1] },
+    },
+  },
+  { $sort: { __regPrio: 1, createdAt: 1, _id: 1 } },
   { $group: { _id: '$patient', branch: { $first: '$branch' } } },
 ];
 
