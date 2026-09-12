@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, Search, ChevronLeft, ChevronRight, Receipt } from 'lucide-react';
@@ -38,6 +38,8 @@ export default function StaffPatients() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const registeredIdRef = useRef<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -50,6 +52,13 @@ export default function StaffPatients() {
       setRows(Array.isArray(payload.data) ? payload.data : []);
       setTotal(payload.total || 0);
       setTotalPages(payload.totalPages || 1);
+      const target = registeredIdRef.current;
+      if (target) {
+        console.log(`[Patients] returnedRecords=${Array.isArray(payload.data) ? payload.data.length : 0}`);
+        const found = Array.isArray(payload.data) && payload.data.some((r) => r._id === target);
+        console.log(`[Patients] savedIdFound=${found}`);
+        registeredIdRef.current = null;
+      }
     } catch {
       setError('Unable to load patients. Please try again.');
     } finally {
@@ -60,6 +69,9 @@ export default function StaffPatients() {
   useEffect(() => {
     const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('search') : null;
     if (q) setSearch(q);
+    const registered =
+      typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('registered') : null;
+    registeredIdRef.current = registered;
   }, []);
 
   useEffect(() => {

@@ -53,7 +53,13 @@ export default function StaffDashboard() {
   }, [loadPatients]);
 
   const handleRegistered = (result: RegisteredResult) => {
-    void loadPatients();
+    const savedId = result.patient?._id;
+    if (savedId) {
+      console.log(`[Registration] savedId=${savedId}`);
+      router.push(`/staff/patients?registered=${encodeURIComponent(savedId)}`);
+    } else {
+      router.push('/staff/patients');
+    }
   };
 
   const recent = todayPatients.slice(0, 4);
