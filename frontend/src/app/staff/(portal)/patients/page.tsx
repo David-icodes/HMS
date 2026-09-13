@@ -5,21 +5,46 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, Search, ChevronLeft, ChevronRight, Receipt } from 'lucide-react';
 import { staffFetch } from '@/lib/staff-auth';
-import type { Branch, Patient, Visit } from '@/types';
+import type { Branch } from '@/types';
 
-interface PatientRow extends Patient {
-  visitCount?: number;
-  outstanding?: number;
-  billed?: number;
-  paid?: number;
-  due?: number;
-  balance?: number;
-  billingVisit?: Visit | null;
-  activeCourse?: { courseNo?: string; totalDays?: number; dayNumber?: number } | null;
+interface EncounterRow {
+  kind: 'visit' | 'registration';
+  _id: string;
+  visitId: string | null;
+  patientId: string;
+  uhid: string | null;
+  name: string | null;
+  mobile: string | null;
+  gender: string | null;
+  age: number | null;
+  cH: string;
+  encounterDate: string;
+  createdAt: string;
+  visitType: string;
+  opNumber: string | null;
+  branch: { _id: string; name: string } | null;
+  department: { _id: string; name: string } | null;
+  doctor: { _id: string; name: string } | null;
+  courseId: string | null;
+  courseNo: string | null;
+  dayNumber: number | null;
+  totalDays: number | null;
+  billed: number;
+  paid: number;
+  due: number;
+  balance: number;
+  invoiceNumber: string | null;
 }
 
 interface ListRes {
-  data: { data: PatientRow[]; total: number; totalPages: number; page: number; limit: number };
+  data: {
+    data: EncounterRow[];
+    total: number;
+    uniquePatients: number;
+    totalPages: number;
+    page: number;
+    limit: number;
+  };
 }
 
 const filterCls =
@@ -29,8 +54,9 @@ const CH_OPTIONS = ['All', 'Clinic', 'Home'];
 
 export default function StaffPatients() {
   const router = useRouter();
-  const [rows, setRows] = useState<PatientRow[]>([]);
+  const [rows, setRows] = useState<EncounterRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [uniquePatients, setUniquePatients] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -58,7 +84,7 @@ export default function StaffPatients() {
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams({ page: String(page), limit: '25', sort: '-createdAt' });
+      const params = new URLSearchParams({ page: String(page), limit: '25' });
       if (search.trim()) params.set('search', search.trim());
       if (ch !== 'All') params.set('ch', ch);
       if (branch) params.set('branch', branch);
@@ -66,14 +92,15 @@ export default function StaffPatients() {
       if (to) params.set('to', to);
       const res = await staffFetch<ListRes>(`/api/staff/patients?${params}`, { signal: controller.signal });
       if (requestId !== loadSeqRef.current) return;
-      const payload = res.data || { data: [], total: 0, totalPages: 1, page, limit: 25 };
+      const payload = res.data || { data: [], total: 0, uniquePatients: 0, totalPages: 1, page, limit: 25 };
       setRows(Array.isArray(payload.data) ? payload.data : []);
       setTotal(payload.total || 0);
+      setUniquePatients(payload.uniquePatients || 0);
       setTotalPages(payload.totalPages || 1);
       const target = registeredIdRef.current;
       if (target) {
         console.log(`[Patients] returnedRecords=${Array.isArray(payload.data) ? payload.data.length : 0}`);
-        const found = Array.isArray(payload.data) && payload.data.some((r) => r._id === target);
+        const found = Array.isArray(payload.data) && payload.data.some((r) => r._id === target || r.patientId === target);
         console.log(`[Patients] savedIdFound=${found}`);
         registeredIdRef.current = null;
       }
@@ -165,7 +192,7 @@ export default function StaffPatients() {
               setPage(1);
             }}
             className={filterCls}
-            title="Registration date from"
+            title="Encounter date from"
           />
           <span className="text-xs font-semibold text-slate-500">To:</span>
           <input
@@ -176,7 +203,7 @@ export default function StaffPatients() {
               setPage(1);
             }}
             className={filterCls}
-            title="Registration date to"
+            title="Encounter date to"
           />
           {(from || to) && (
             <button
@@ -215,73 +242,90 @@ export default function StaffPatients() {
               <option key={o} value={o}>{o}</option>
             ))}
           </select>
-          <span className="whitespace-nowrap text-xs text-slate-500">{total} patient(s)</span>
+          <span className="whitespace-nowrap text-xs text-slate-500">
+            {total} encounter(s) · {uniquePatients} patient(s)
+          </span>
         </div>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[1050px] text-left text-xs">
+        <table className="w-full min-w-[1200px] text-left text-xs">
           <thead className="bg-slate-50">
             <tr className="text-[10px] uppercase tracking-wider text-slate-500">
               <th className="px-3 py-2.5 font-semibold">S.No</th>
+              <th className="px-3 py-2.5 font-semibold">Encounter Date</th>
+              <th className="px-3 py-2.5 font-semibold">Type</th>
+              <th className="px-3 py-2.5 font-semibold">OP No.</th>
               <th className="px-3 py-2.5 font-semibold">UHID</th>
               <th className="px-3 py-2.5 font-semibold">Patient</th>
               <th className="px-3 py-2.5 font-semibold">Mobile</th>
               <th className="px-3 py-2.5 font-semibold">C/H</th>
-              <th className="px-3 py-2.5 text-right font-semibold">Visits</th>
+              <th className="px-3 py-2.5 font-semibold">Branch</th>
+              <th className="px-3 py-2.5 font-semibold">Course</th>
               <th className="px-3 py-2.5 text-right font-semibold">Billed</th>
               <th className="px-3 py-2.5 text-right font-semibold">Paid</th>
               <th className="px-3 py-2.5 text-right font-semibold">Due</th>
-              <th className="px-3 py-2.5 text-right font-semibold">Balance</th>
-              <th className="px-3 py-2.5 font-semibold">Last Visit</th>
               <th className="px-3 py-2.5 font-semibold">Invoice</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={12} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
-                  <p className="mt-2">Loading patients...</p>
+                  <p className="mt-2">Loading patient activity...</p>
                 </td>
               </tr>
             ) : error ? (
               <tr>
-                <td colSpan={12} className="px-4 py-12 text-center text-red-500">{error}</td>
+                <td colSpan={14} className="px-4 py-12 text-center text-red-500">{error}</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-4 py-12 text-center text-slate-400">
-                  No patients found.
+                <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
+                  No patient activity found.
                 </td>
               </tr>
             ) : (
-              rows.map((p, i) => (
-                <tr key={p._id} className="cursor-pointer hover:bg-slate-50">
+              rows.map((r, i) => (
+                <tr
+                  key={r._id}
+                  className="cursor-pointer hover:bg-slate-50"
+                  onClick={() => router.push(`/staff/patients/${r.patientId}`)}
+                >
                   <td className="px-3 py-2.5 text-slate-500">{(page - 1) * 25 + i + 1}</td>
-                  <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{p.uhid || '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-700">{formatDate(r.encounterDate)}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${r.kind === 'registration' ? 'bg-slate-100 text-slate-500' : r.visitType === 'New OP' ? 'bg-teal-50 text-teal-700' : 'bg-indigo-50 text-indigo-600'}`}>
+                      {r.kind === 'registration' ? 'Reg' : r.visitType}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{r.opNumber || '—'}</td>
+                  <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{r.uhid || '—'}</td>
                   <td className="px-3 py-2.5 font-medium text-slate-800">
-                    {p.name || '—'}
-                    {p.activeCourse && (
+                    {r.name || '—'}
+                    {r.courseNo && (
                       <span className="ml-1.5 rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-600">
-                        {p.activeCourse.courseNo} {p.activeCourse.dayNumber}/{p.activeCourse.totalDays}
+                        {r.courseNo}
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2.5 text-slate-600">{p.mobile || '—'}</td>
-                  <td className="px-3 py-2.5 text-slate-600">{p.cH || 'Clinic'}</td>
-                  <td className="px-3 py-2.5 text-right text-slate-500">{p.visitCount || 0}</td>
-                  <td className="px-3 py-2.5 text-right text-slate-800">{inr(p.billed)}</td>
-                  <td className="px-3 py-2.5 text-right text-slate-600">{inr(p.paid)}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(p.due)}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-teal-600">{inr(p.balance)}</td>
+                  <td className="px-3 py-2.5 text-slate-600">{r.mobile || '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-600">{r.cH || 'Clinic'}</td>
+                  <td className="px-3 py-2.5 text-slate-600">{r.branch?.name || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">
-                    {p.lastVisit ? formatDate(p.lastVisit.visitDate) : '—'}
+                    {r.courseNo
+                      ? `${r.courseNo}${r.dayNumber ? ` · D${r.dayNumber}/${r.totalDays}` : ''}`
+                      : '—'}
                   </td>
+                  <td className="px-3 py-2.5 text-right text-slate-800">{inr(r.billed)}</td>
+                  <td className="px-3 py-2.5 text-right text-slate-600">{inr(r.paid)}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(r.due)}</td>
                   <td className="px-3 py-2.5">
-                    {p.billingVisit ? (
+                    {r.invoiceNumber ? (
                       <Link
-                        href={`/staff/visits/${p.billingVisit._id}/invoice`}
+                        href={`/staff/visits/${r.visitId}/invoice`}
+                        onClick={(e) => e.stopPropagation()}
                         className="inline-flex items-center gap-1 rounded-md border border-teal-600 px-2.5 py-1 text-[10px] font-semibold text-teal-700 hover:bg-teal-50"
                       >
                         <Receipt className="h-3 w-3" /> Invoice

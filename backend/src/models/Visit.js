@@ -33,6 +33,9 @@ const visitSchema = new mongoose.Schema(
     patient: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
     uhid: { type: String, trim: true },
     visitDate: { type: Date, default: Date.now },
+    // Snapshot of Home/Clinic at the time of the encounter. Legacy visits store
+    // nothing here; consumers fall back to the linked Patient's cH.
+    cH: { type: String, trim: true },
     visitType: { type: String, enum: ['New OP', 'Follow-up'], default: 'New OP' },
     branch: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
     department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },

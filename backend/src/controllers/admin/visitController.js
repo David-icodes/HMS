@@ -236,6 +236,7 @@ const createVisitForPatient = async (patient, body, userId, userName, submission
     uhid: patient.uhid,
     visitDate: body.visit?.visitDate || new Date(),
     visitType,
+    cH: body.visit?.cH || patient.cH || undefined,
     branch: body.visit?.branch || undefined,
     department: body.visit?.department || undefined,
     doctor: body.visit?.doctor || undefined,
@@ -355,7 +356,7 @@ const updateVisit = asyncHandler(async (req, res) => {
   if (!visit) throw new ApiError(404, 'Visit not found');
 
   const v = req.body.visit || req.body;
-  for (const f of ['visitDate', 'visitType', 'branch', 'department', 'doctor', 'referralDoctor', 'concern', 'diagnosis', 'treatment', 'noOfDays', 'notes', 'signature']) {
+  for (const f of ['visitDate', 'visitType', 'cH', 'branch', 'department', 'doctor', 'referralDoctor', 'concern', 'diagnosis', 'treatment', 'noOfDays', 'notes', 'signature']) {
     if (v[f] !== undefined) visit[f] = v[f];
   }
 
@@ -409,7 +410,7 @@ const adminUpdateVisit = asyncHandler(async (req, res) => {
 
   // Visit updates
   const v = req.body.visit || req.body;
-  for (const f of ['visitDate', 'visitType', 'branch', 'department', 'doctor', 'referralDoctor', 'concern', 'diagnosis', 'treatment', 'noOfDays', 'notes', 'signature']) {
+  for (const f of ['visitDate', 'visitType', 'cH', 'branch', 'department', 'doctor', 'referralDoctor', 'concern', 'diagnosis', 'treatment', 'noOfDays', 'notes', 'signature']) {
     if (v[f] !== undefined) visit[f] = v[f];
   }
 
@@ -744,43 +745,182 @@ const getStaffDashboard = asyncHandler(async (req, res) => {
   }));
 });
 
+// ---------- Encounter register (Staff → Patients) ----------
+// Every encounter (New OP + Follow-up visit) of every non-archived patient is its
+// own row, ordered by latest encounter date first. The same person therefore
+// appears once per activity, exactly like the registration/course ledger and the
+// paper OP register. enrollment rows are visits; a patient with no visit yet is
+// still listed once as a registration-only row so nobody disappears.
 const listMasterPatients = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 20, search, from, to, branch, department, gender, ch, sort = '-createdAt' } = req.query;
-  const query = { isArchived: { $ne: true } };
+  const { page = 1, limit = 25, search, from, to, branch, department, gender, ch } = req.query;
   const range = parseRange(from, to);
-  if (range.$gte || range.$lte) query.createdAt = range;
-  if (branch) query._id = { $in: await patientIdsByRegistrationBranch(branch) };
-  if (department) query._id = { $in: await Visit.distinct('patient', { department }) };
-  if (gender) query.gender = gender;
-  if (ch) {
-    const term = String(ch).trim().toLowerCase();
-    if (term === 'home') query.cH = HOME_CH_RE;
-    else if (term === 'clinic') query.cH = { $not: HOME_CH_RE };
-  }
 
+  // 1) Identity scope: matching patients (archived excluded, gender, search).
+  const patientQ = { isArchived: { $ne: true } };
+  if (gender) patientQ.gender = gender;
   if (search) {
     const term = String(search).trim();
     const digits = term.replace(/\D/g, '');
-    const or = [{ name: new RegExp(term, 'i') }, { uhid: new RegExp(term, 'i') }, { mobile: new RegExp(term, 'i') }];
+    const or = [
+      { name: new RegExp(term, 'i') },
+      { uhid: new RegExp(term, 'i') },
+      { mobile: new RegExp(term, 'i') },
+    ];
     if (digits) or.push({ mobile: new RegExp(digits) });
-    query.$and = [{ $or: or }];
+    patientQ.$and = [{ $or: or }];
+  }
+  const candidates = await Patient.find(patientQ)
+    .select('uhid name mobile age gender cH createdAt')
+    .lean();
+  const candidateIds = candidates.map((p) => p._id);
+  const patientMap = {};
+  candidates.forEach((p) => (patientMap[String(p._id)] = p));
+
+  // 2) Encounter scope over those patients: date / branch / department / C/H.
+  const visitQ = { patient: { $in: candidateIds } };
+  if (range.$gte || range.$lte) visitQ.visitDate = range;
+  if (branch && mongoose.isValidObjectId(branch)) visitQ.branch = branch;
+  if (department && mongoose.isValidObjectId(department)) visitQ.department = department;
+  if (ch) {
+    const term = String(ch).trim().toLowerCase();
+    const homeIds = await homePatientIds();
+    const noCH = { $in: [null, ''] };
+    const homeCond = { $or: [{ cH: HOME_CH_RE }, { $and: [{ cH: noCH }, { patient: { $in: homeIds } }] }] };
+    const clinicCond = {
+      $or: [
+        { $and: [{ cH: { $exists: true } }, { cH: { $not: HOME_CH_RE } }] },
+        { $and: [{ cH: noCH }, { patient: { $nin: homeIds } }] },
+      ],
+    };
+    visitQ.$and = visitQ.$and || [];
+    if (term === 'home') visitQ.$and.push(homeCond);
+    else if (term === 'clinic') visitQ.$and.push(clinicCond);
   }
 
-  const total = await Patient.countDocuments(query);
-  const sortKey = sort.replace(/^-/, '');
-  const sortDir = sort.startsWith('-') ? -1 : 1;
-  const patients = await Patient.find(query)
-    // Stable ordering keeps a newly saved patient at the top of page one even
-    // when two registrations share the same millisecond timestamp.
-    .sort({ [sortKey]: sortDir, _id: -1 })
-    .skip((Number(page) - 1) * Number(limit))
-    .limit(Number(limit));
+  const [visits, courses] = await Promise.all([
+    Visit.find(visitQ)
+      .select('patient visitDate visitType cH branch department doctor opNumber charges payment invoiceNumber courseId dayNumber totalDays createdAt')
+      .populate('branch', 'name')
+      .populate('department', 'name')
+      .populate('doctor', 'name')
+      .lean(),
+    Course.find({ _id: { $in: await Visit.distinct('courseId', visitQ) } })
+      .select('courseNo')
+      .lean(),
+  ]);
+  const courseMap = {};
+  courses.forEach((c) => (courseMap[String(c._id)] = c.courseNo));
 
-  const rows = await buildPatientRows(patients);
+  const rows = visits.map((v) => {
+    const pid = String(v.patient);
+    const p = patientMap[pid] || {};
+    const billed = Math.max(0, Number(v.charges?.total) || 0);
+    const paid = Math.max(0, Number(v.payment?.advanced) || 0);
+    return {
+      kind: 'visit',
+      _id: String(v._id),
+      visitId: String(v._id),
+      patientId: pid,
+      uhid: p.uhid || v.uhid || null,
+      name: p.name || null,
+      mobile: p.mobile || null,
+      gender: p.gender || null,
+      age: p.age != null ? p.age : null,
+      cH: v.cH || p.cH || 'Clinic',
+      encounterDate: v.visitDate,
+      createdAt: v.createdAt,
+      visitType: v.visitType || 'New OP',
+      opNumber: v.opNumber || null,
+      branch: v.branch ? { _id: String(v.branch._id), name: v.branch.name } : null,
+      department: v.department ? { _id: String(v.department._id), name: v.department.name } : null,
+      doctor: v.doctor ? { _id: String(v.doctor._id), name: v.doctor.name } : null,
+      courseId: v.courseId ? String(v.courseId) : null,
+      courseNo: v.courseId ? courseMap[String(v.courseId)] || null : null,
+      dayNumber: v.dayNumber || null,
+      totalDays: v.totalDays || null,
+      billed,
+      paid,
+      due: Math.max(0, Number(v.payment?.due) || 0),
+      balance: Math.max(0, Math.round((paid - billed) * 100) / 100),
+      invoiceNumber: v.invoiceNumber || null,
+    };
+  });
+
+  // 3) Registration-only rows: a patient matched by identity filters but with NO
+  //    visits at all still gets a row (registration exists without activity yet).
+  //    A patient whose visits merely fall outside the current encounter filters
+  //    must NOT be injected here — that would fake an extra registration row.
+  const keptCandidates = [];
+  const zeroVisitAgg = await Visit.aggregate([
+    { $match: { patient: { $in: candidateIds } } },
+    { $group: { _id: '$patient' } },
+  ]);
+  const anyVisitIds = new Set(zeroVisitAgg.map((r) => String(r._id)));
+  candidates.forEach((p) => {
+    if (!anyVisitIds.has(String(p._id))) keptCandidates.push(p);
+  });
+  for (const p of keptCandidates) {
+    if (branch || department) continue;
+    if (range.$gte || range.$lte) {
+      const t = new Date(p.createdAt).getTime();
+      if (range.$gte && t < range.$gte.getTime()) continue;
+      if (range.$lte && t > range.$lte.getTime()) continue;
+    }
+    if (ch) {
+      const term = String(ch).trim().toLowerCase();
+      const home = HOME_CH_RE.test(p.cH || '');
+      if (term === 'home' && !home) continue;
+      if (term === 'clinic' && home) continue;
+    }
+    rows.push({
+      kind: 'registration',
+      _id: String(p._id),
+      visitId: null,
+      patientId: String(p._id),
+      uhid: p.uhid,
+      name: p.name,
+      mobile: p.mobile,
+      gender: p.gender,
+      age: p.age != null ? p.age : null,
+      cH: p.cH || 'Clinic',
+      encounterDate: p.createdAt,
+      createdAt: p.createdAt,
+      visitType: 'New OP',
+      opNumber: null,
+      branch: null,
+      department: null,
+      doctor: null,
+      courseId: null,
+      courseNo: null,
+      dayNumber: null,
+      totalDays: null,
+      billed: 0,
+      paid: 0,
+      due: 0,
+      balance: 0,
+      invoiceNumber: null,
+    });
+  }
+
+  rows.sort((a, b) => {
+    const da = new Date(a.encounterDate).getTime();
+    const db = new Date(b.encounterDate).getTime();
+    if (db !== da) return db - da;
+    const ca = new Date(a.createdAt).getTime();
+    const cb = new Date(b.createdAt).getTime();
+    if (cb !== ca) return cb - ca;
+    return String(b._id).localeCompare(String(a._id));
+  });
+
+  const total = rows.length;
+  const uniquePatients = new Set(rows.map((r) => r.patientId)).size;
+  const start = (Number(page) - 1) * Number(limit);
+  const data = rows.slice(start, start + Number(limit));
   res.status(200).json(
     new ApiResponse(200, {
-      data: rows,
+      data,
       total,
+      uniquePatients,
       page: Number(page),
       limit: Number(limit),
       totalPages: Math.max(1, Math.ceil(total / Number(limit))),

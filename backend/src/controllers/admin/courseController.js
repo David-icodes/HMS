@@ -162,6 +162,7 @@ const createCourse = asyncHandler(async (req, res) => {
     uhid: patient.uhid,
     visitDate: startDate,
     visitType: 'New OP',
+    cH: b.cH || patient.cH || undefined,
     branch: b.branch || undefined,
     department: b.department || undefined,
     doctor: b.doctor || undefined,
@@ -320,6 +321,8 @@ const addFollowUp = asyncHandler(async (req, res) => {
   if (nextDay > course.totalDays) {
     throw new ApiError(400, `Course has already completed all ${course.totalDays} days`);
   }
+  const followPatient = await Patient.findById(course.patient).lean();
+  const patientCH = b.cH || followPatient?.cH || undefined;
 
   const additionalCharge = money('Additional charge', b.additionalCharge);
   const paymentAmount = money('Payment amount', b.paymentAmount);
@@ -337,6 +340,7 @@ const addFollowUp = asyncHandler(async (req, res) => {
     totalDays: course.totalDays,
     visitDate,
     visitType: 'Follow-up',
+    cH: patientCH,
     branch: b.branch || course.branch,
     department: b.department || course.department,
     doctor: b.doctor || course.doctor,
