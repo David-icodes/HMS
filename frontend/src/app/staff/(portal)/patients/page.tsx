@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, Search, ChevronLeft, ChevronRight, Receipt } from 'lucide-react';
 import { staffFetch } from '@/lib/staff-auth';
-import type { Patient, Visit } from '@/types';
+import type { Branch, Patient, Visit } from '@/types';
 
 interface PatientRow extends Patient {
   visitCount?: number;
@@ -35,6 +35,8 @@ export default function StaffPatients() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [ch, setCh] = useState('All');
+  const [branch, setBranch] = useState('');
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -47,6 +49,7 @@ export default function StaffPatients() {
       const params = new URLSearchParams({ page: String(page), limit: '25', sort: '-createdAt' });
       if (search.trim()) params.set('search', search.trim());
       if (ch !== 'All') params.set('ch', ch);
+      if (branch) params.set('branch', branch);
       const res = await staffFetch<ListRes>(`/api/staff/patients?${params}`);
       const payload = res.data || { data: [], total: 0, totalPages: 1, page, limit: 25 };
       setRows(Array.isArray(payload.data) ? payload.data : []);
@@ -64,7 +67,22 @@ export default function StaffPatients() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, ch]);
+  }, [page, search, ch, branch]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await staffFetch<{ data: Branch[] }>('/api/site/branches?limit=50');
+        if (mounted) setBranches(Array.isArray(res.data) ? res.data : []);
+      } catch {
+        if (mounted) setBranches([]);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('search') : null;
@@ -94,6 +112,24 @@ export default function StaffPatients() {
           />
         </div>
         <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-500">Branch:</span>
+          <select
+            value={branch}
+            onChange={(e) => {
+              setBranch(e.target.value);
+              setPage(1);
+            }}
+            className={filterCls}
+          >
+            <option value="">All Branches</option>
+            {branches
+              .filter((b) => !!b && !!b._id)
+              .map((b) => (
+                <option key={b._id} value={b._id}>
+                  {b.name}
+                </option>
+              ))}
+          </select>
           <select value={ch} onChange={(e) => { setCh(e.target.value); setPage(1); }} className={filterCls}>
             {CH_OPTIONS.map((o) => (
               <option key={o} value={o}>{o}</option>
