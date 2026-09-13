@@ -36,7 +36,7 @@ export class StaffApiError extends Error {
 
 export async function staffFetch<T = unknown>(
   path: string,
-  options: { method?: string; body?: unknown; cache?: RequestCache } = {},
+  options: { method?: string; body?: unknown; cache?: RequestCache; signal?: AbortSignal } = {},
 ): Promise<T> {
   const { token } = useStaffAuth.getState();
   const res = await fetch(path, {
@@ -46,6 +46,7 @@ export async function staffFetch<T = unknown>(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
     // Staff records are operational data; never reuse an HTTP-cached list after
     // a registration succeeds.
     cache: options.cache ?? 'no-store',

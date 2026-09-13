@@ -37,12 +37,21 @@ export default function StaffPatients() {
   const [ch, setCh] = useState('All');
   const [branch, setBranch] = useState('');
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [urlReady, setUrlReady] = useState(false);
 
   const registeredIdRef = useRef<string | null>(null);
+  const loadSeqRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const requestId = ++loadSeqRef.current;
     setLoading(true);
     setError('');
     try {
@@ -50,7 +59,10 @@ export default function StaffPatients() {
       if (search.trim()) params.set('search', search.trim());
       if (ch !== 'All') params.set('ch', ch);
       if (branch) params.set('branch', branch);
-      const res = await staffFetch<ListRes>(`/api/staff/patients?${params}`);
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      const res = await staffFetch<ListRes>(`/api/staff/patients?${params}`, { signal: controller.signal });
+      if (requestId !== loadSeqRef.current) return;
       const payload = res.data || { data: [], total: 0, totalPages: 1, page, limit: 25 };
       setRows(Array.isArray(payload.data) ? payload.data : []);
       setTotal(payload.total || 0);
@@ -62,12 +74,14 @@ export default function StaffPatients() {
         console.log(`[Patients] savedIdFound=${found}`);
         registeredIdRef.current = null;
       }
-    } catch {
+    } catch (err) {
+      if (requestId !== loadSeqRef.current) return;
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError('Unable to load patients. Please try again.');
     } finally {
-      setLoading(false);
+      if (requestId === loadSeqRef.current) setLoading(false);
     }
-  }, [page, search, ch, branch]);
+  }, [page, search, ch, branch, from, to]);
 
   useEffect(() => {
     let mounted = true;
@@ -84,17 +98,24 @@ export default function StaffPatients() {
     };
   }, []);
 
+  // Apply URL parameters (search / registered) exactly once, then release the
+  // first load. Delaying the initial request until after this runs guarantees a
+  // single authoritative fetch instead of an unfiltered request followed by a
+  // second identical one when arriving via /staff/patients?search=...
   useEffect(() => {
-    const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('search') : null;
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const q = params?.get('search') || null;
     if (q) setSearch(q);
-    const registered =
-      typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('registered') : null;
+    const registered = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('registered') : null;
     registeredIdRef.current = registered;
+    setUrlReady(true);
   }, []);
 
   useEffect(() => {
+    if (!urlReady) return;
     void load();
-  }, [load]);
+    return () => abortRef.current?.abort();
+  }, [urlReady, load]);
 
   return (
     <div className="space-y-4">
@@ -110,6 +131,42 @@ export default function StaffPatients() {
             placeholder="Search UHID / name / mobile…"
             className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-teal-500 focus:outline-none"
           />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-500">From:</span>
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => {
+              setFrom(e.target.value);
+              setPage(1);
+            }}
+            className={filterCls}
+            title="Registration date from"
+          />
+          <span className="text-xs font-semibold text-slate-500">To:</span>
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setPage(1);
+            }}
+            className={filterCls}
+            title="Registration date to"
+          />
+          {(from || to) && (
+            <button
+              onClick={() => {
+                setFrom('');
+                setTo('');
+                setPage(1);
+              }}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Clear
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-slate-500">Branch:</span>
