@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, Search, ChevronLeft, ChevronRight, Receipt } from 'lucide-react';
 import { staffFetch } from '@/lib/staff-auth';
@@ -42,8 +42,11 @@ export default function StaffPatients() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [urlReady, setUrlReady] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const pathname = usePathname();
 
   const registeredIdRef = useRef<string | null>(null);
+  const lastRegisteredRef = useRef<string | null>(null);
   const loadSeqRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -106,16 +109,36 @@ export default function StaffPatients() {
     const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
     const q = params?.get('search') || null;
     if (q) setSearch(q);
-    const registered = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('registered') : null;
-    registeredIdRef.current = registered;
+    registeredIdRef.current = params?.get('registered') || null;
     setUrlReady(true);
   }, []);
+
+  // React to the registered param on every navigation into this page. Next.js
+  // App Router may reuse an already-mounted instance (soft navigation), so the
+  // mount-only effect above does not re-run; without this, arriving via
+  // ?registered=<id> after a fresh registration would show stale rows and the
+  // newly registered patient would appear only after a search/filter change.
+  useEffect(() => {
+    if (pathname !== '/staff/patients') return;
+    const registered = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('registered') || null : null;
+    if (registered && registered !== lastRegisteredRef.current) {
+      lastRegisteredRef.current = registered;
+      registeredIdRef.current = registered;
+      setPage(1);
+      setSearch('');
+      setCh('All');
+      setBranch('');
+      setFrom('');
+      setTo('');
+      setRefreshKey((k) => k + 1);
+    }
+  }, [pathname]);
 
   useEffect(() => {
     if (!urlReady) return;
     void load();
     return () => abortRef.current?.abort();
-  }, [urlReady, load]);
+  }, [urlReady, load, refreshKey]);
 
   return (
     <div className="space-y-4">
