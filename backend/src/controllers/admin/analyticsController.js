@@ -5,7 +5,7 @@ const HomeVisit = require('../../models/HomeVisit');
 const PaymentTransaction = require('../../models/PaymentTransaction');
 const Course = require('../../models/Course');
 const Branch = require('../../models/Branch');
-const { registrationCountsByBranch, registrationDataByBranch, patientIdsByRegistrationBranch } = require('../../utils/registrationBranch');
+const { registrationDataByBranch, patientIdsByRegistrationBranch } = require('../../utils/registrationBranch');
 const ApiResponse = require('../../utils/ApiResponse');
 const ApiError = require('../../utils/ApiError');
 const asyncHandler = require('../../utils/asyncHandler');
@@ -94,37 +94,107 @@ const registrationByDay = async (range, branch, ch) => {
   ]);
 };
 
-// ---------- Branch list: patients + finances per branch ----------
-// Branch patient counts come from the canonical Patient registration ledger
-// attributed to the branch of each registration (first New OP visit). Visit,
-// follow-up, course-day and payment records never multiply these counts, and an
-// archived (deleted) registration drops out immediately. Financial figures come
+// ---------- Encounter-scope helpers (mirror Staff → Patients) ----------
+const activePatientIds = () => Patient.distinct('_id', { isArchived: { $ne: true } });
+
+// The exact same per-visit C/H semantics as Staff → Patients
+// (visit.cH when present, else patient.cH, else 'Clinic').
+const CH_SPLIT = {
+  home: { $eq: [{ $toLower: { $trim: { input: { $ifNull: ['$cH', { $ifNull: ['$__p.cH', ''] }] } } } }, 'home'] },
+};
+
+// Build the C/H match filter used by the encounter register (mirrors
+// visitController.listMasterPatients): stored visit C/H wins; legacy visits fall
+// back to the patient's C/H. Returns {} when no C/H filter requested.
+const encounterCHMatch = async (term) => {
+  if (String(term).trim().toLowerCase() !== 'home' && String(term).trim().toLowerCase() !== 'clinic') return {};
+  const homeIds = await homePatientIds();
+  const noCH = { $in: [null, ''] };
+  const homeCond = { $or: [{ cH: HOME_CH_RE }, { $and: [{ cH: noCH }, { patient: { $in: homeIds } }] }] };
+  const clinicCond = {
+    $or: [
+      { $and: [{ cH: { $exists: true } }, { cH: { $not: HOME_CH_RE } }] },
+      { $and: [{ cH: noCH }, { patient: { $nin: homeIds } }] },
+    ],
+  };
+  return String(term).trim().toLowerCase() === 'home' ? { $and: [homeCond] } : { $and: [clinicCond] };
+};
+
+// ---------- Branch list: encounters + finances per branch ----------
+// Encounter counts come from the SAME source of truth as Staff → Patients:
+// every Visit (New OP + Follow-up) of a non-archived patient is one encounter,
+// grouped by the ENCOUNTER's branch (Visit.branch), date-scoped by visitDate and
+// C/H-scoped per encounter (visit.cH → patient.cH). Financial figures still come
 // from the shared branchFinancialMap (billed once per course, paid = actual valid
-// payments), so a card always reflects the current database state after refetch.
+// transactions) so revenue logic is untouched.
 const branchList = asyncHandler(async (req, res) => {
   const q = req.query;
   const range = parseRange(q.date || q.from, q.date || q.to);
-  const reg = await registrationDataByBranch(range);
-  const counts = reg.counts;
+  const activeIds = await activePatientIds();
+
+  const encMatch = { patient: { $in: activeIds } };
+  if (range.$gte || range.$lte) encMatch.visitDate = range;
+  if (q.branch && mongoose.isValidObjectId(q.branch)) encMatch.branch = new mongoose.Types.ObjectId(q.branch);
+  const chMatch = await encounterCHMatch(q.ch);
+  if (chMatch.$and && chMatch.$and.length) encMatch.$and = chMatch.$and;
+
+  const encAgg = await Visit.aggregate([
+    { $match: encMatch },
+    { $lookup: { from: 'patients', localField: 'patient', foreignField: '_id', as: '__p' } },
+    { $unwind: { path: '$__p', preserveNullAndEmptyArrays: false } },
+    {
+      $group: {
+        _id: '$branch',
+        encounters: { $sum: 1 },
+        clinic: { $sum: { $cond: [CH_SPLIT.home, 0, 1] } },
+        home: { $sum: { $cond: [CH_SPLIT.home, 1, 0] } },
+        patients: { $addToSet: '$patient' },
+      },
+    },
+  ]);
+  const encByBranch = new Map(encAgg.map((r) => [r._id ? r._id.toString() : 'unassigned', r]));
+
   const finances = await branchFinancialMap({
     visitFilter: buildVisitFilter(q),
     visitScope: {},
     txFilter: buildTxFilter(q),
     homeFilter: buildHomeVisitFilter(q),
     chHome: false,
-    attribution: reg.attribution,
+    attribution: (await registrationDataByBranch(range)).attribution,
   });
+
   const branches = await Branch.find({ isActive: true }).sort({ order: 1, name: 1 });
+  const activeBranchIds = new Set(branches.map((b) => b._id.toString()));
+
+  // Fold encounters whose stored branch does not resolve to a currently active
+  // branch (null, deleted, or inactive branch) into a single Unassigned bucket so
+  // the per-branch encounter sum ALWAYS equals the ungrouped register total. The
+  // visit records themselves are left untouched.
+  const encByActive = new Map();
+  const unassignedAcc = { encounters: 0, clinic: 0, home: 0, patients: new Set() };
+  encAgg.forEach((r) => {
+    const key = r._id ? r._id.toString() : 'unassigned';
+    if (activeBranchIds.has(key)) {
+      encByActive.set(key, r);
+    } else {
+      unassignedAcc.encounters += r.encounters;
+      unassignedAcc.clinic += r.clinic;
+      unassignedAcc.home += r.home;
+      r.patients.forEach((p) => unassignedAcc.patients.add(String(p)));
+    }
+  });
+
   const rows = branches.map((b) => {
-    const c = counts.get(b._id.toString()) || { patients: 0, clinic: 0, home: 0 };
+    const e = encByActive.get(b._id.toString()) || { encounters: 0, clinic: 0, home: 0, patients: [] };
     const f = finances[b._id.toString()] || { totalBilled: 0, totalPaid: 0, totalDue: 0, totalBalance: 0 };
     return {
       _id: b._id,
       name: b.name,
       area: b.area,
-      patients: c.patients,
-      clinicPatients: c.clinic,
-      homePatients: c.home,
+      encounters: e.encounters,
+      uniquePatients: e.patients.length,
+      clinicEncounters: e.clinic,
+      homeEncounters: e.home,
       billed: f.totalBilled,
       paid: f.totalPaid,
       due: f.totalDue,
@@ -132,10 +202,58 @@ const branchList = asyncHandler(async (req, res) => {
     };
   });
 
+  // A patient registered in scope with ZERO visits ever gets one registration-only
+  // row in Staff → Patients (never multiplied, never injected when the encounter
+  // is filtered by branch). Mirror exactly: count them here so the ungrouped
+  // Branch Reports total reconciles with the register, attributed to Unassigned
+  // (they carry no encounter branch).
+  if (!q.branch) {
+    const regOnlyQ = { isArchived: { $ne: true } };
+    if (range.$gte || range.$lte) regOnlyQ.createdAt = range;
+    const term = String(q.ch || '').trim().toLowerCase();
+    if (term === 'home') regOnlyQ.cH = HOME_CH_RE;
+    else if (term === 'clinic') regOnlyQ.cH = { $not: HOME_CH_RE };
+    const regOnlyRows = await Patient.aggregate([
+      { $match: regOnlyQ },
+      { $lookup: { from: 'visits', localField: '_id', foreignField: 'patient', as: '__v' } },
+      { $match: { __v: { $size: 0 } } },
+      { $project: { cH: 1 } },
+    ]);
+    const regOnly = regOnlyRows.length;
+    if (regOnly > 0) {
+      let clinic = 0;
+      let home = 0;
+      let u = unassignedAcc;
+      regOnlyRows.forEach((p) => {
+        if (HOME_CH_RE.test(p.cH || '')) home += 1;
+        else clinic += 1;
+        u.patients.add(`regonly:${String(p._id)}`);
+      });
+      u.encounters += regOnly;
+      u.clinic += clinic;
+      u.home += home;
+    }
+  }
+  if (unassignedAcc.encounters > 0) {
+    rows.push({
+      _id: 'unassigned',
+      name: 'Unassigned',
+      area: 'No active branch recorded on encounter',
+      encounters: unassignedAcc.encounters,
+      uniquePatients: unassignedAcc.patients.size,
+      clinicEncounters: unassignedAcc.clinic,
+      homeEncounters: unassignedAcc.home,
+      billed: 0,
+      paid: 0,
+      due: 0,
+      balance: 0,
+    });
+  }
+
   res.status(200).json(new ApiResponse(200, rows));
 });
 
-// ---------- Single branch: registration-based stats + registration list ----------
+// ---------- Single branch: encounter stats + encounter list ----------
 const branchDetail = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid branch id');
   const branch = await Branch.findById(req.params.id);
@@ -143,32 +261,81 @@ const branchDetail = asyncHandler(async (req, res) => {
 
   const q = req.query;
   const range = parseRange(q.date || q.from, q.date || q.to);
-  const counts = await registrationCountsByBranch(range);
-  const c = counts.get(req.params.id) || { patients: 0, clinic: 0, home: 0 };
+  const activeIds = await activePatientIds();
 
-  const ids = await patientIdsByRegistrationBranch(req.params.id);
-  const query = {
-    isArchived: { $ne: true },
-    _id: { $in: ids },
-    ...(range.$gte || range.$lte ? { createdAt: range } : {}),
-  };
+  const encMatch = { patient: { $in: activeIds }, branch: branch._id };
+  if (range.$gte || range.$lte) encMatch.visitDate = range;
+  const chMatch = await encounterCHMatch(q.ch);
+  if (chMatch.$and && chMatch.$and.length) encMatch.$and = chMatch.$and;
+
+  const statsAgg = await Visit.aggregate([
+    { $match: encMatch },
+    { $lookup: { from: 'patients', localField: 'patient', foreignField: '_id', as: '__p' } },
+    { $unwind: { path: '$__p', preserveNullAndEmptyArrays: false } },
+    {
+      $group: {
+        _id: null,
+        encounters: { $sum: 1 },
+        clinic: { $sum: { $cond: [CH_SPLIT.home, 0, 1] } },
+        home: { $sum: { $cond: [CH_SPLIT.home, 1, 0] } },
+        patients: { $addToSet: '$patient' },
+      },
+    },
+  ]);
+  const s = statsAgg[0] || { encounters: 0, clinic: 0, home: 0, patients: [] };
+
   const page = Math.max(1, Math.floor(Number(q.page) || 1));
   const limit = Math.min(500, Math.max(1, Math.floor(Number(q.limit) || 100)));
-  const [total, registrations] = await Promise.all([
-    Patient.countDocuments(query),
-    Patient.find(query)
-      .sort({ createdAt: -1, _id: -1 })
+  const [total, visits] = await Promise.all([
+    Visit.countDocuments(encMatch),
+    Visit.find(encMatch)
+      .sort({ visitDate: -1, createdAt: -1, _id: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
-      .select('uhid name mobile age gender cH fN address createdAt')
+      .select('patient visitDate visitType cH branch department doctor opNumber charges payment invoiceNumber courseId dayNumber totalDays createdAt')
+      .populate('branch', 'name')
+      .populate('department', 'name')
+      .populate('doctor', 'name')
       .lean(),
   ]);
+  const pidSet = new Set(visits.map((v) => String(v.patient)));
+  const patients = await Patient.find({ _id: { $in: [...pidSet] } })
+    .select('uhid name mobile age gender cH fN')
+    .lean();
+  const patMap = {};
+  patients.forEach((p) => (patMap[String(p._id)] = p));
+
+  const rows = visits.map((v) => {
+    const p = patMap[String(v.patient)] || {};
+    return {
+      _id: String(v._id),
+      visitId: String(v._id),
+      patientId: String(v.patient),
+      uhid: p.uhid || v.uhid || null,
+      name: p.name || null,
+      mobile: p.mobile || null,
+      gender: p.gender || null,
+      age: p.age != null ? p.age : null,
+      fN: p.fN || null,
+      cH: v.cH || p.cH || 'Clinic',
+      encounterDate: v.visitDate,
+      visitType: v.visitType || 'New OP',
+      opNumber: v.opNumber || null,
+      billed: Math.max(0, Number(v.charges?.total) || 0),
+      paid: Math.max(0, Number(v.payment?.advanced) || 0),
+      due: Math.max(0, Number(v.payment?.due) || 0),
+      branch: v.branch ? { _id: String(v.branch._id), name: v.branch.name } : null,
+      invoiceNumber: v.invoiceNumber || null,
+      dayNumber: v.dayNumber || null,
+      totalDays: v.totalDays || null,
+    };
+  });
 
   res.status(200).json(
     new ApiResponse(200, {
       branch: { _id: branch._id, name: branch.name, area: branch.area, phone: branch.phone },
-      stats: { patients: c.patients, clinicPatients: c.clinic, homePatients: c.home },
-      registrations,
+      stats: { encounters: s.encounters, clinicEncounters: s.clinic, homeEncounters: s.home, uniquePatients: s.patients.length },
+      encounters: rows,
       total,
       page,
       limit,

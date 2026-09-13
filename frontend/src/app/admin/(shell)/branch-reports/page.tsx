@@ -9,31 +9,41 @@ interface BranchRow {
   _id: string;
   name: string;
   area: string;
-  patients: number;
-  clinicPatients: number;
-  homePatients: number;
+  encounters: number;
+  uniquePatients: number;
+  clinicEncounters: number;
+  homeEncounters: number;
   billed: number;
   paid: number;
   due: number;
   balance: number;
 }
 
-interface RegistrationRow {
+interface EncounterRow {
   _id: string;
+  visitId: string;
+  patientId: string;
   uhid?: string;
   name: string;
-  mobile: string;
+  mobile?: string;
   age?: number;
   gender?: string;
   cH?: string;
   fN?: string;
-  createdAt: string;
+  encounterDate: string;
+  visitType: string;
+  opNumber?: string;
+  billed: number;
+  paid: number;
+  due: number;
+  dayNumber?: number;
+  totalDays?: number;
 }
 
 interface BranchDetail {
   branch: { _id: string; name: string; area: string; phone?: string };
-  stats: { patients: number; clinicPatients: number; homePatients: number };
-  registrations: RegistrationRow[];
+  stats: { encounters: number; clinicEncounters: number; homeEncounters: number; uniquePatients: number };
+  encounters: EncounterRow[];
   total: number;
   totalPages: number;
   page: number;
@@ -144,32 +154,34 @@ export default function AdminBranchReportsPage() {
         ) : (
           <>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Stat label="Patients" value={selected.stats.patients.toLocaleString()} icon={Users} tone="sky" />
-              <Stat label="Clinic Registrations" value={selected.stats.clinicPatients.toLocaleString()} icon={Users} tone="emerald" />
-              <Stat label="Home Registrations" value={selected.stats.homePatients.toLocaleString()} icon={Users} tone="violet" />
+              <Stat label="Encounters" value={selected.stats.encounters.toLocaleString()} icon={Users} tone="sky" />
+              <Stat label="Clinic Encounters" value={selected.stats.clinicEncounters.toLocaleString()} icon={Users} tone="emerald" />
+              <Stat label="Home Encounters" value={selected.stats.homeEncounters.toLocaleString()} icon={Users} tone="violet" />
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-                <h3 className="text-sm font-bold text-slate-900">Registered Patients</h3>
-                <p className="text-xs text-slate-400">{selected.total} patient(s) registered at this branch</p>
+                <h3 className="text-sm font-bold text-slate-900">Encounters</h3>
+                <p className="text-xs text-slate-400">{selected.total} encounter(s) · {selected.stats.uniquePatients} patient(s) at this branch</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500">
                     <tr>
-                      <Th>No</Th><Th>UHID</Th><Th>Registered</Th><Th>Patient</Th><Th>Mobile</Th><Th>C/H</Th><Th>Gender</Th><Th>Age</Th><Th>F/N</Th>
+                      <Th>No</Th><Th>Encounter Date</Th><Th>Type</Th><Th>OP No.</Th><Th>UHID</Th><Th>Patient</Th><Th>Mobile</Th><Th>C/H</Th><Th>Gender</Th><Th>Age</Th><Th>F/N</Th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {selected.registrations.length === 0 ? (
-                      <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">No registrations for the selected date range.</td></tr>
+                    {selected.encounters.length === 0 ? (
+                      <tr><td colSpan={11} className="px-4 py-10 text-center text-slate-400">No encounters for the selected date range.</td></tr>
                     ) : (
-                      selected.registrations.map((r, i) => (
+                      selected.encounters.map((r, i) => (
                         <tr key={r._id} className="hover:bg-slate-50">
                           <td className="px-3 py-2.5 text-slate-500">{(selected.page - 1) * selected.limit + i + 1}</td>
+                          <td className="px-3 py-2.5 text-slate-600">{formatDate(r.encounterDate)}</td>
+                          <td className="px-3 py-2.5 text-slate-600">{r.visitType}</td>
+                          <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{r.opNumber || '—'}</td>
                           <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{r.uhid || '—'}</td>
-                          <td className="px-3 py-2.5 text-slate-600">{formatDate(r.createdAt)}</td>
                           <td className="px-3 py-2.5 font-medium text-slate-800">{r.name || '—'}</td>
                           <td className="px-3 py-2.5 text-slate-600">{r.mobile || '—'}</td>
                           <td className="px-3 py-2.5 text-slate-600">{r.cH || 'Clinic'}</td>
@@ -214,7 +226,7 @@ export default function AdminBranchReportsPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center">
         <p className="text-sm text-slate-500">
-          Patients are actual registrations. Revenue/Billed comes from billing (a course is billed once), Paid from valid payments, Due = Billed − Paid (never negative).
+          Encounters are visits (New OP + follow-ups) of non-archived patients, grouped by encounter branch. Revenue/Billed comes from billing (a course is billed once), Paid from valid payments, Due = Billed − Paid (never negative).
         </p>
         <div className="flex flex-1 flex-wrap items-center gap-2 lg:justify-end">
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
@@ -231,22 +243,24 @@ export default function AdminBranchReportsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map((b) => (
+          {rows.map((b) => {
+            const navigable = b._id !== 'unassigned';
+            return (
             <button
               key={b._id}
-              onClick={() => { setBranchPage(1); void openBranch(b._id); }}
-              className="group flex flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/40"
+              onClick={() => { if (navigable) { setBranchPage(1); void openBranch(b._id); } }}
+              className={`group flex flex-col rounded-2xl border ${navigable ? 'border-slate-200 hover:border-sky-300 hover:bg-sky-50/40' : 'border-dashed border-slate-200'} bg-white p-5 text-left shadow-sm transition-colors`}
             >
               <div className="flex items-start justify-between">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-50 text-sky-600 group-hover:bg-sky-100">
                   <Building2 className="h-5 w-5" />
                 </div>
                 <span className="rounded-md bg-sky-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
-                  {b.patients.toLocaleString()} Patients
+                  {b.encounters.toLocaleString()} Encounters
                 </span>
               </div>
               <p className="mt-3 text-base font-bold text-slate-900">{b.name}</p>
-              <p className="text-xs text-slate-400">{b.area || '—'}</p>
+              <p className="text-xs text-slate-400">{b.area || '—'} · {b.uniquePatients} patients</p>
 
               <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
                 <Money label="Revenue" value={b.billed} icon={IndianRupee} tone="sky" />
@@ -257,14 +271,15 @@ export default function AdminBranchReportsPage() {
 
               <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
                 <span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">
-                  {b.clinicPatients} Clinic
+                  {b.clinicEncounters} Clinic
                 </span>
                 <span className="rounded bg-violet-50 px-2 py-1 text-[10px] font-semibold text-violet-600">
-                  {b.homePatients} Home
+                  {b.homeEncounters} Home
                 </span>
               </div>
             </button>
-          ))}
+            );
+          })}
           {rows.length === 0 && (
             <p className="col-span-full py-16 text-center text-sm text-slate-400">No branch data for the selected date range.</p>
           )}
