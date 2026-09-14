@@ -11,10 +11,20 @@ import DailyRegister from '@/components/admin/DailyRegister';
 import type { Branch, Patient, Visit } from '@/types';
 
 interface PatientRow extends Patient {
+  kind?: 'visit' | 'registration';
+  patientId?: string;
+  visitId?: string | null;
+  encounterDate?: string;
+  visitType?: string;
+  opNumber?: string | null;
   billed?: number;
   paid?: number;
   due?: number;
   balance?: number;
+  invoiceNumber?: string | null;
+  courseNo?: string | null;
+  dayNumber?: number | null;
+  totalDays?: number | null;
   billingVisit?: Visit | null;
   activeCourse?: { courseNo?: string; totalDays?: number; dayNumber?: number } | null;
 }
@@ -81,33 +91,50 @@ export default function AdminPatientsPage() {
     void load();
   }, [load]);
 
-  const openEdit = (p: PatientRow) => {
-    const v = p.lastVisit || p.billingVisit;
-    if (!v) {
+  const openEdit = async (p: PatientRow) => {
+    // Encounter rows represent a single OP/visit (row._id == Visit ID).
+    // Admin "Edit" is a complete OP edit of that specific visit + its patient,
+    // so it must be keyed by the Visit ID (p.visitId), not the patient ID.
+    if (!p.patientId || !p.visitId) {
       toast.error('This patient has no visit to edit');
       return;
     }
-    setEditingVisit({
-      ...v,
-      patient: {
-        _id: p._id,
-        uhid: p.uhid || '',
-        name: p.name,
-        mobile: p.mobile,
-        age: p.age,
-        gender: p.gender,
-        cH: p.cH,
-        fN: p.fN || '',
-        address: p.address,
-      },
-    });
+    try {
+      const res = await adminFetch<{ data: { patient: PatientRow; visits: Visit[] } }>(
+        `/api/admin/patients/${p.patientId}`,
+      );
+      const info = res.data || ({} as { patient?: PatientRow; visits?: Visit[] });
+      const visit = (info.visits || []).find((v) => String(v._id) === String(p.visitId));
+      if (!visit) {
+        toast.error('This visit could not be loaded for editing');
+        return;
+      }
+      const mast = info.patient || {};
+      setEditingVisit({
+        ...visit,
+        patient: {
+          _id: p.patientId,
+          uhid: p.uhid || mast.uhid || '',
+          name: p.name || mast.name || '',
+          mobile: p.mobile || mast.mobile || '',
+          age: p.age ?? mast.age,
+          gender: p.gender || mast.gender || 'Male',
+          cH: p.cH || mast.cH || 'Clinic',
+          fN: mast.fN || '',
+          address: mast.address,
+        },
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load patient');
+    }
   };
 
   const remove = async (p: PatientRow) => {
     if (!window.confirm(`Are you sure you want to delete this registration?\n\n${p.name} (${p.mobile})`)) return;
-    setDeletingId(p._id);
+    const patientId = p.patientId || p._id;
+    setDeletingId(patientId);
     try {
-      await adminFetch(`/api/admin/patients/${p._id}`, { method: 'DELETE' });
+      await adminFetch(`/api/admin/patients/${patientId}`, { method: 'DELETE' });
       toast.success('Registration deleted');
       void load();
     } catch (err) {
@@ -305,24 +332,31 @@ export default function AdminPatientsPage() {
                   <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{p.uhid || '—'}</td>
                   <td className="px-3 py-2.5 font-medium text-slate-800">
                     {p.name || '—'}
-                    {p.activeCourse && (
+                    {(p.activeCourse || p.courseNo) && (
                       <span className="ml-1.5 rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-600">
-                        {p.activeCourse.courseNo} {p.activeCourse.dayNumber}/{p.activeCourse.totalDays}
+                        {p.courseNo || p.activeCourse?.courseNo} {p.dayNumber ?? p.activeCourse?.dayNumber}/{p.totalDays ?? p.activeCourse?.totalDays}
                       </span>
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-slate-600">{p.mobile || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">{p.cH || 'Clinic'}</td>
-                  <td className="px-3 py-2.5 text-right text-slate-500">{p.visitCount || 0}</td>
+                  <td className="px-3 py-2.5 text-right text-slate-500">{p.kind === 'visit' ? 1 : p.visitCount || 0}</td>
                   <td className="px-3 py-2.5 text-right text-slate-800">{inr(p.billed)}</td>
                   <td className="px-3 py-2.5 text-right text-slate-600">{inr(p.paid)}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{inr(p.due)}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-teal-600">{inr(p.balance)}</td>
                   <td className="px-3 py-2.5 text-slate-600">
-                    {p.lastVisit ? formatDate(p.lastVisit.visitDate) : '—'}
+                    {p.encounterDate ? formatDate(p.encounterDate) : p.lastVisit ? formatDate(p.lastVisit.visitDate) : '—'}
                   </td>
                   <td className="px-3 py-2.5">
-                    {p.billingVisit ? (
+                    {p.invoiceNumber && p.visitId ? (
+                      <Link
+                        href={`/staff/visits/${p.visitId}/invoice`}
+                        className="inline-flex items-center gap-1 rounded-md border border-sky-600 px-2.5 py-1 text-[10px] font-semibold text-sky-700 hover:bg-sky-50"
+                      >
+                        Invoice
+                      </Link>
+                    ) : p.billingVisit ? (
                       <Link
                         href={`/staff/visits/${p.billingVisit._id}/invoice`}
                         className="inline-flex items-center gap-1 rounded-md border border-sky-600 px-2.5 py-1 text-[10px] font-semibold text-sky-700 hover:bg-sky-50"
@@ -336,14 +370,14 @@ export default function AdminPatientsPage() {
                   <td className="px-3 py-2.5 text-right">
                     <div className="inline-flex items-center gap-1">
                       <Link
-                        href={`/admin/patients/${p._id}`}
+                        href={`/admin/patients/${p.patientId || p._id}`}
                         className="rounded-md p-1.5 text-slate-500 hover:bg-sky-50 hover:text-sky-600"
                         aria-label="View"
                       >
                         <Eye className="h-3.5 w-3.5" />
                       </Link>
                       <button
-                        onClick={() => openEdit(p)}
+                        onClick={() => void openEdit(p)}
                         className="rounded-md p-1.5 text-slate-500 hover:bg-sky-50 hover:text-sky-600"
                         aria-label="Edit"
                       >
@@ -351,11 +385,11 @@ export default function AdminPatientsPage() {
                       </button>
                       <button
                         onClick={() => void remove(p)}
-                        disabled={deletingId === p._id}
+                        disabled={deletingId === (p.patientId || p._id)}
                         className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
                         aria-label="Delete"
                       >
-                        {deletingId === p._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        {deletingId === (p.patientId || p._id) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                       </button>
                     </div>
                   </td>

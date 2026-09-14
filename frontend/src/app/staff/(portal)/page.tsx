@@ -9,12 +9,18 @@ import { staffFetch } from '@/lib/staff-auth';
 import type { Patient } from '@/types';
 
 interface PatientRow extends Patient {
-  visitCount?: number;
-  outstanding?: number;
+  kind?: 'visit' | 'registration';
+  patientId?: string;
+  visitId?: string | null;
+  encounterDate?: string;
+  visitType?: string;
   billed?: number;
   paid?: number;
   due?: number;
   balance?: number;
+  courseNo?: string | null;
+  dayNumber?: number | null;
+  totalDays?: number | null;
   activeCourse?: { courseNo?: string; totalDays?: number; dayNumber?: number } | null;
 }
 
@@ -90,7 +96,7 @@ export default function StaffDashboard() {
               <Loader2 className="h-6 w-6 animate-spin text-teal-600" />
             </div>
           ) : todayPatients.length === 0 ? (
-            <p className="px-5 py-12 text-center text-sm text-slate-400">No patients registered today yet.</p>
+            <p className="px-5 py-12 text-center text-sm text-slate-400">No patients seen today yet.</p>
           ) : (
             <>
               <table className="w-full min-w-[900px] text-left text-xs">
@@ -111,9 +117,9 @@ export default function StaffDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {recent.map((p, i) => (
                     <tr
-                      key={p._id}
+                      key={p.patientId || p._id}
                       className="cursor-pointer hover:bg-slate-50"
-                      onClick={() => router.push(`/staff/patients/${p._id}`)}
+                      onClick={() => router.push(`/staff/patients/${p.patientId || p._id}`)}
                     >
                       <td className="px-4 py-3 text-slate-500">{i + 1}</td>
                       <td className="px-4 py-3 font-mono text-[10px] text-slate-500">{p.uhid || '—'}</td>
@@ -125,8 +131,8 @@ export default function StaffDashboard() {
                       <td className="px-4 py-3 text-right font-semibold text-amber-600">{inr(p.due)}</td>
                       <td className="px-4 py-3 text-right font-semibold text-teal-600">{inr(p.balance)}</td>
                       <td className="px-4 py-3 text-slate-600">
-                        {p.activeCourse
-                          ? `${p.activeCourse.courseNo} (${p.activeCourse.dayNumber}/${p.activeCourse.totalDays})`
+                        {p.courseNo || p.activeCourse
+                          ? `${p.courseNo || p.activeCourse?.courseNo} (${p.dayNumber ?? p.activeCourse?.dayNumber}/${p.totalDays ?? p.activeCourse?.totalDays})`
                           : '—'}
                       </td>
                     </tr>
@@ -135,7 +141,7 @@ export default function StaffDashboard() {
               </table>
               {todayPatients.length > 4 && (
                 <p className="border-t border-slate-100 px-5 py-3 text-xs text-slate-400">
-                  Showing the latest {Math.min(recent.length, 4)} of {todayPatients.length} patients registered today.
+                  Showing the latest {Math.min(recent.length, 4)} of {todayPatients.length} patients seen today.
                   <Link href="/staff/patients" className="ml-1 font-semibold text-teal-600 hover:underline">
                     View all
                   </Link>

@@ -722,26 +722,132 @@ const getStaffDashboard = asyncHandler(async (req, res) => {
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const range = parseRange(date, date);
   if (!range.$gte || !range.$lte) throw new ApiError(400, 'Invalid dashboard date');
-  // Today's Patients = every patient registration created within the local
-  // hospital day (Clinic + Home). Counts come from the Patient collection
-  // itself, never from the 4-row preview, so every registration is counted
-  // exactly once and course/follow-up/payment activity never inflates them.
-  const baseQuery = { isArchived: { $ne: true }, createdAt: range };
+  // Today's Patients counts today's ENCOUNTERS (New OP + Follow-up visits) of
+  // every non-archived patient — exactly the same scope as Staff → Patients and
+  // Branch Reports — so a patient registered earlier but seen today is counted
+  // here too. Counts never come from the 4-row preview; every encounter and
+  // registration-only patient is tallied exactly once.
+  const candidates = await Patient.find({ isArchived: { $ne: true } })
+    .select('uhid name mobile age gender cH createdAt')
+    .lean();
+  const candidateIds = candidates.map((p) => p._id);
+  const patientMap = {};
+  candidates.forEach((p) => (patientMap[String(p._id)] = p));
 
-  const [total, homeCount, recent] = await Promise.all([
-    Patient.countDocuments(baseQuery),
-    Patient.countDocuments({ ...baseQuery, cH: HOME_CH_RE }),
-    Patient.find(baseQuery)
-      .sort({ createdAt: -1, _id: -1 })
-      .limit(4)
-      .select('uhid name mobile cH createdAt')
+  const visitQ = { patient: { $in: candidateIds }, visitDate: range };
+  const [visits, courses] = await Promise.all([
+    Visit.find(visitQ)
+      .select('patient visitDate visitType cH branch department doctor opNumber charges payment invoiceNumber courseId dayNumber totalDays createdAt')
+      .populate('branch', 'name')
+      .populate('department', 'name')
+      .populate('doctor', 'name')
+      .lean(),
+    Course.find({ _id: { $in: await Visit.distinct('courseId', visitQ) } })
+      .select('courseNo')
       .lean(),
   ]);
+  const courseMap = {};
+  courses.forEach((c) => (courseMap[String(c._id)] = c.courseNo));
 
-  const clinic = total - homeCount;
+  const rows = visits.map((v) => {
+    const pid = String(v.patient);
+    const p = patientMap[pid] || {};
+    const billed = Math.max(0, Number(v.charges?.total) || 0);
+    const paid = Math.max(0, Number(v.payment?.advanced) || 0);
+    const cH = v.cH || p.cH || 'Clinic';
+    return {
+      kind: 'visit',
+      _id: String(v._id),
+      visitId: String(v._id),
+      patientId: pid,
+      uhid: p.uhid || v.uhid || null,
+      name: p.name || null,
+      mobile: p.mobile || null,
+      gender: p.gender || null,
+      age: p.age != null ? p.age : null,
+      cH,
+      encounterDate: v.visitDate,
+      createdAt: v.createdAt,
+      visitType: v.visitType || 'New OP',
+      opNumber: v.opNumber || null,
+      branch: v.branch ? { _id: String(v.branch._id), name: v.branch.name } : null,
+      department: v.department ? { _id: String(v.department._id), name: v.department.name } : null,
+      doctor: v.doctor ? { _id: String(v.doctor._id), name: v.doctor.name } : null,
+      courseId: v.courseId ? String(v.courseId) : null,
+      courseNo: v.courseId ? courseMap[String(v.courseId)] || null : null,
+      dayNumber: v.dayNumber || null,
+      totalDays: v.totalDays || null,
+      billed,
+      paid,
+      due: Math.max(0, Number(v.payment?.due) || 0),
+      balance: Math.max(0, Math.round((paid - billed) * 100) / 100),
+      invoiceNumber: v.invoiceNumber || null,
+      clinic: isHomeCh(cH) ? 0 : 1,
+      home: isHomeCh(cH) ? 1 : 0,
+    };
+  });
+
+  // Registration-only rows: a brand-new patient registered today with NO visit
+  // yet still counts, mirroring the encounter register, so nobody disappears.
+  const zeroVisitAgg = await Visit.aggregate([
+    { $match: { patient: { $in: candidateIds } } },
+    { $group: { _id: '$patient' } },
+  ]);
+  const anyVisitIds = new Set(zeroVisitAgg.map((r) => String(r._id)));
+  for (const p of candidates) {
+    if (anyVisitIds.has(String(p._id))) continue;
+    const t = new Date(p.createdAt).getTime();
+    if (t < range.$gte.getTime() || t > range.$lte.getTime()) continue;
+    const cH = p.cH || 'Clinic';
+    rows.push({
+      kind: 'registration',
+      _id: String(p._id),
+      visitId: null,
+      patientId: String(p._id),
+      uhid: p.uhid,
+      name: p.name,
+      mobile: p.mobile,
+      gender: p.gender,
+      age: p.age != null ? p.age : null,
+      cH,
+      encounterDate: p.createdAt,
+      createdAt: p.createdAt,
+      visitType: 'New OP',
+      opNumber: null,
+      branch: null,
+      department: null,
+      doctor: null,
+      courseId: null,
+      courseNo: null,
+      dayNumber: null,
+      totalDays: null,
+      billed: 0,
+      paid: 0,
+      due: 0,
+      balance: 0,
+      invoiceNumber: null,
+      clinic: isHomeCh(cH) ? 0 : 1,
+      home: isHomeCh(cH) ? 1 : 0,
+    });
+  }
+
+  rows.sort((a, b) => {
+    const da = new Date(a.encounterDate).getTime();
+    const db = new Date(b.encounterDate).getTime();
+    if (db !== da) return db - da;
+    const ca = new Date(a.createdAt).getTime();
+    const cb = new Date(b.createdAt).getTime();
+    if (cb !== ca) return cb - ca;
+    return String(b._id).localeCompare(String(a._id));
+  });
+
+  const clinic = rows.reduce((sum, r) => sum + r.clinic, 0);
+  const home = rows.reduce((sum, r) => sum + r.home, 0);
+  const recent = rows.slice(0, 4).map(({ clinic: _c, home: _h, ...row }) => row);
+
   res.status(200).json(new ApiResponse(200, {
     date,
-    patients: { total, clinic, home: homeCount, recent },
+    patients: { total: rows.length, clinic, home, recent },
   }));
 });
 
