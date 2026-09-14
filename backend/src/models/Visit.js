@@ -71,6 +71,12 @@ const visitSchema = new mongoose.Schema(
 visitSchema.index({ patient: 1, visitDate: -1 });
 visitSchema.index({ branch: 1, visitDate: -1 });
 visitSchema.index({ uhid: 1 });
+// A course day is identified by (courseId + dayNumber): a course can have at
+// most one visit per day number. Partial so non-course visits stay unaffected.
+visitSchema.index(
+  { courseId: 1, dayNumber: 1 },
+  { unique: true, partialFilterExpression: { courseId: { $exists: true }, dayNumber: { $exists: true } } }
+);
 
 async function generateOpNumber() {
   if (this.opNumber) return;

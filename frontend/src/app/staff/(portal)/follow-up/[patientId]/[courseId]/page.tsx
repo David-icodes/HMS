@@ -89,6 +89,7 @@ export default function CourseDetailPage() {
     paymentMethod: '',
     visitDate: new Date().toISOString().slice(0, 10),
     notes: '',
+    cH: '',
   };
   const [follow, setFollow] = useState({ ...emptyFollow });
 
@@ -130,6 +131,8 @@ export default function CourseDetailPage() {
       await staffFetch(`/api/staff/courses/${courseId}/follow-up`, {
         method: 'POST',
         body: {
+          dayNumber: (payload.completedDays ?? payload.visits?.length ?? 0) + 1,
+          cH: follow.cH || payload.patient?.cH || 'Clinic',
           treatment: follow.treatment.trim() || undefined,
           diagnosis: follow.diagnosis.trim() || undefined,
           notes: follow.notes.trim() || undefined,
@@ -216,7 +219,6 @@ export default function CourseDetailPage() {
   const balance = course.balance ?? payload.balance ?? Math.max(0, paid - billed);
   const initialAdvance = course.initialAdvance ?? payload.initialAdvance ?? 0;
   const totalDays = course.totalDays || 1;
-  const currentDay = course.dayNumber || Math.min(completedDays + 1, totalDays);
   const payAuto = computePayment(billed, paid);
 
   const visitsByDay: Record<number, CourseRowVisit> = {};
@@ -245,10 +247,10 @@ export default function CourseDetailPage() {
           )}
           {course.status === 'Active' && completedDays < totalDays && (
             <button
-              onClick={() => { setPayMode(false); setFollow({ ...emptyFollow, visitDate: toInputDate(scheduledDate(course.startDate, completedDays + 1)) }); setFollowMode(true); }}
+              onClick={() => { setPayMode(false); setFollow({ ...emptyFollow, cH: patient?.cH || 'Clinic', visitDate: toInputDate(scheduledDate(course.startDate, completedDays + 1)) }); setFollowMode(true); }}
               className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
             >
-              <Plus className="h-4 w-4" /> Add Day {completedDays + 1}
+              <Plus className="h-4 w-4" /> Add Day {completedDays + 1}/{totalDays}
             </button>
           )}
           {due > 0 && (
@@ -326,7 +328,7 @@ export default function CourseDetailPage() {
               <Stat label="Total Course Days" value={String(totalDays)} />
               <Stat label="Completed Days" value={String(completedDays)} />
               <Stat label="Remaining Days" value={String(Math.max(0, totalDays - completedDays))} />
-              <Stat label="Progress" value={`Day ${currentDay} of ${totalDays}`} />
+              <Stat label="Progress" value={`${completedDays}/${totalDays} · Next Day ${completedDays + 1}`} />
             </div>
           </div>
 
@@ -353,12 +355,18 @@ export default function CourseDetailPage() {
       {followMode && (
         <form onSubmit={addFollowUp} className="rounded-2xl border border-teal-200 bg-teal-50/40 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900">Day {completedDays + 1} Follow-up</h3>
+            <h3 className="text-sm font-bold text-slate-900">Day {completedDays + 1}/{totalDays} Follow-up</h3>
             <button type="button" onClick={() => setFollowMode(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
               <X className="h-4 w-4" />
             </button>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="C/H">
+              <select value={follow.cH} onChange={(e) => setFollow({ ...follow, cH: e.target.value })} className={inputCls}>
+                <option value="Clinic">Clinic</option>
+                <option value="Home">Home</option>
+              </select>
+            </Field>
             <Field label="Treatment">
               <input value={follow.treatment} onChange={(e) => setFollow({ ...follow, treatment: e.target.value })} className={inputCls} placeholder="Treatment given" />
             </Field>
@@ -392,7 +400,7 @@ export default function CourseDetailPage() {
             className="mt-4 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            {saving ? 'Saving…' : `Save Day ${completedDays + 1}`}
+            {saving ? 'Saving…' : `Save Day ${completedDays + 1}/${totalDays}`}
           </button>
         </form>
       )}

@@ -316,8 +316,26 @@ const addFollowUp = asyncHandler(async (req, res) => {
   if (course.status !== 'Active') throw new ApiError(400, 'Course is not active');
 
   const b = req.body;
-  const visitCount = await Visit.countDocuments({ courseId: course._id });
-  const nextDay = visitCount + 1;
+
+  // Identity for a course day is (courseId + dayNumber). We compute the next
+  // available day and refuse to create a second row for an already-recorded
+  // day, so re-submitting "Day 2" never creates another Day 2 visit.
+  const visitsSoFar = await Visit.find({ courseId: course._id }).select('dayNumber').lean();
+  const recordedDays = new Set(
+    visitsSoFar.map((v) => v.dayNumber).filter((d) => typeof d === 'number' && d >= 1)
+  );
+  let nextDay;
+  if (b.dayNumber !== undefined && b.dayNumber !== null && b.dayNumber !== '') {
+    nextDay = Number(b.dayNumber);
+    if (!Number.isInteger(nextDay) || nextDay < 1) {
+      throw new ApiError(400, 'Day number must be a positive integer');
+    }
+    if (recordedDays.has(nextDay)) {
+      throw new ApiError(409, `Day ${nextDay} of course ${course.courseNo} is already recorded`);
+    }
+  } else {
+    nextDay = recordedDays.size ? Math.max(...recordedDays) + 1 : 1;
+  }
   if (nextDay > course.totalDays) {
     throw new ApiError(400, `Course has already completed all ${course.totalDays} days`);
   }
@@ -333,7 +351,9 @@ const addFollowUp = asyncHandler(async (req, res) => {
   const visitDate = b.visitDate ? new Date(b.visitDate) : new Date();
   if (Number.isNaN(visitDate.getTime())) throw new ApiError(400, 'Invalid visit date');
 
-  const visit = await Visit.create({
+  let visit;
+  try {
+    visit = await Visit.create({
     patient: course.patient,
     courseId: course._id,
     dayNumber: nextDay,
@@ -376,6 +396,12 @@ const addFollowUp = asyncHandler(async (req, res) => {
     signature: b.signature?.trim() || undefined,
     staffId: b.staffId || b.staff || undefined,
   });
+  } catch (err) {
+    if (err && err.code === 11000 && err.keyPattern && err.keyPattern.courseId) {
+      throw new ApiError(409, `Day ${nextDay} of course ${course.courseNo} is already recorded`);
+    }
+    throw err;
+  }
 
   if (additionalCharge > 0) {
     course.additionalCharges = round2((course.additionalCharges || 0) + additionalCharge);

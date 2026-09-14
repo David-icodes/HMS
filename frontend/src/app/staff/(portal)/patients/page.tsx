@@ -315,7 +315,7 @@ export default function StaffPatients() {
                   <td className="px-3 py-2.5 text-slate-600">{r.branch?.name || '—'}</td>
                   <td className="px-3 py-2.5 text-slate-600">
                     {r.courseNo
-                      ? `${r.courseNo}${r.dayNumber ? ` · D${r.dayNumber}/${r.totalDays}` : ''}`
+                      ? `${r.courseNo}${r.dayNumber ? ` · ${r.dayNumber}/${r.totalDays}` : ''}`
                       : '—'}
                   </td>
                   <td className="px-3 py-2.5 text-right text-slate-800">{inr(r.billed)}</td>
