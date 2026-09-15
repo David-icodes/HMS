@@ -151,12 +151,12 @@ router.get('/courses/:id/balance', authorize('superAdmin', 'admin'), getCourseBa
 router
   .route('/users')
   .get(authorize('superAdmin', 'admin'), listUsers)
-  .post(authorize('superAdmin'), validate(createUserValidator), createUser);
+  .post(authorize('superAdmin', 'admin'), validate(createUserValidator), createUser);
 
 router
   .route('/users/:id')
-  .put(authorize('superAdmin'), validate([...updateUserValidator]), updateUser)
-  .delete(authorize('superAdmin'), deleteUser);
+  .put(authorize('superAdmin', 'admin'), validate([...updateUserValidator]), updateUser)
+  .delete(authorize('superAdmin', 'admin'), deleteUser);
 
 router.post('/upload', authorize('superAdmin', 'admin', 'contentEditor'), uploadImage);
 router.delete('/upload/:publicId', authorize('superAdmin', 'admin', 'contentEditor'), deleteImage);

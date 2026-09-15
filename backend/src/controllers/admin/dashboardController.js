@@ -1,4 +1,5 @@
 const Patient = require('../../models/Patient');
+const Visit = require('../../models/Visit');
 const Appointment = require('../../models/Appointment');
 const Doctor = require('../../models/Doctor');
 const Branch = require('../../models/Branch');
@@ -36,9 +37,6 @@ const getDashboard = asyncHandler(async (req, res) => {
     totalAppointments,
     todayAppointments,
     totalPatients,
-    todayPatients,
-    clinicToday,
-    homeToday,
     totalDoctors,
     totalBranches,
     totalServices,
@@ -50,13 +48,12 @@ const getDashboard = asyncHandler(async (req, res) => {
     recentAppointments,
     recentPatients,
     recentActivity,
+    activePatients,
+    todayVisits,
   ] = await Promise.all([
     Appointment.countDocuments(),
     Appointment.countDocuments({ createdAt: todayWindow }),
     Patient.countDocuments({ isArchived: { $ne: true } }),
-    Patient.countDocuments({ isArchived: { $ne: true }, createdAt: todayWindow }),
-    Patient.countDocuments({ isArchived: { $ne: true }, createdAt: todayWindow, cH: { $not: HOME_CH_RE } }),
-    Patient.countDocuments({ isArchived: { $ne: true }, createdAt: todayWindow, cH: HOME_CH_RE }),
     Doctor.countDocuments({ isActive: true }),
     Branch.countDocuments({ isActive: true }),
     Service.countDocuments({ isActive: true }),
@@ -71,7 +68,25 @@ const getDashboard = asyncHandler(async (req, res) => {
       .limit(8)
       .select('uhid name mobile cH fN createdAt'),
     ActivityLog.find().sort({ createdAt: -1 }).limit(10),
+    Patient.find({ isArchived: { $ne: true } }).select('_id cH').lean(),
+    Visit.find({ patient: { $ne: null }, visitDate: todayWindow }).select('patient cH').lean(),
   ]);
+
+  // Today's Patients = today's ENCOUNTERS (the same definition as Staff →
+  // Patients, Branch Reports and the OP register): every Visit whose visitDate
+  // falls inside the hospital-local day, for non-archived patients. Clinic/Home
+  // follows Visit.cH with the legacy fallback to the patient's own cH.
+  const activePatientCH = {};
+  activePatients.forEach((p) => (activePatientCH[String(p._id)] = p.cH || ''));
+  const noArchived = new Set(activePatients.map((p) => String(p._id)));
+  const activeTodayVisits = todayVisits.filter((v) => noArchived.has(String(v.patient)));
+  let homeToday = 0;
+  activeTodayVisits.forEach((v) => {
+    const ch = v.cH || activePatientCH[String(v.patient)] || 'Clinic';
+    if (HOME_CH_RE.test(ch)) homeToday += 1;
+  });
+  const todayPatients = activeTodayVisits.length;
+  const clinicToday = todayPatients - homeToday;
 
   const visitsMap = {};
   visits.forEach((v) => {

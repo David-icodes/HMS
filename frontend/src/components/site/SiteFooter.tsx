@@ -81,7 +81,7 @@ export default function SiteFooter({
           </div>
 
           <div className="flex flex-col items-center gap-4 border-t border-slate-200 pt-6 text-center">
-            <div className="flex items-center gap-5 text-xs text-slate-500">
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-500">
               <Link href="/privacy-policy" className="hover:text-brand-700">
                 Privacy Policy
               </Link>

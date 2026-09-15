@@ -207,7 +207,7 @@ function VisitInvoiceSheet({ visit, invoice }: { visit: Visit; invoice: Invoice 
       </div>
 
       {/* Patient / visit info */}
-      <div className="grid grid-cols-2 gap-x-6 gap-y-3 pt-5 text-sm">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-3 pt-5 text-sm sm:grid-cols-2">
         <div>
           <Row label="Patient ID / UHID" value={pat?.uhid || visit.uhid || '—'} />
           <Row label="Patient Name" value={pat?.name || '—'} />
@@ -252,7 +252,7 @@ function VisitInvoiceSheet({ visit, invoice }: { visit: Visit; invoice: Invoice 
       </table>
 
       <div className="mt-4 flex justify-end">
-        <div className="w-72 space-y-1.5 text-sm">
+        <div className="w-full max-w-72 space-y-1.5 text-sm">
           <Row label="TOTAL" value={inr(c.total)} bold />
           <Row label="Previous Advance" value={inr(pay.previousAdvance || 0)} />
           <Row label="Paid / Advance" value={inr(pay.advanced)} />

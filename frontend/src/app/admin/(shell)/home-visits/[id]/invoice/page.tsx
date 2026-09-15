@@ -157,7 +157,7 @@ function HomeVisitInvoiceSheet({ hv }: { hv: HomeVisit }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-6 gap-y-3 pt-5 text-sm">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-3 pt-5 text-sm sm:grid-cols-2">
         <div>
           <Row label="Patient Name" value={hv.patientName || '—'} />
           <Row label="Contact" value={hv.contact || '—'} />

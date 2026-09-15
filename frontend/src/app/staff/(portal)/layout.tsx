@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Loader2, LogOut, LayoutDashboard, Users, Repeat } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Users, Repeat, Menu, X } from 'lucide-react';
 import { useStaffAuth, fetchStaffMe, STAFF_ROLES } from '@/lib/staff-auth';
 
 function titleFor(pathname: string) {
@@ -19,6 +19,7 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
   const router = useRouter();
   const pathname = usePathname();
   const [verified, setVerified] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -71,7 +72,7 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
               <p className="text-[11px] text-slate-400">Urmila Raj Hospital</p>
             </div>
           </div>
-          <nav className="flex items-center gap-1 text-sm font-medium">
+          <nav className="hidden items-center gap-1 text-sm font-medium md:flex">
             <Link
               href="/staff"
               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 transition-colors ${pathname === '/staff' ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50'}`}
@@ -99,13 +100,71 @@ export default function StaffPortalLayout({ children }: { children: React.ReactN
             <button
               onClick={logout}
               title="Sign out"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-red-600"
+              className="hidden items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-red-600 md:inline-flex"
             >
               <LogOut className="h-4 w-4" /> Sign out
+            </button>
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 md:hidden"
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
             </button>
           </div>
         </div>
       </header>
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+          <div className="absolute right-0 top-0 flex h-full w-[80%] max-w-xs flex-col overflow-y-auto bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <p className="text-sm font-bold text-slate-900">Menu</p>
+              <button
+                onClick={() => setMobileOpen(false)}
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+                aria-label="Close menu"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <nav className="flex-1 p-3" aria-label="Mobile">
+              <Link
+                href="/staff"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-3 text-sm font-medium ${pathname === '/staff' ? 'bg-teal-50 text-teal-700' : 'text-slate-700 hover:bg-slate-50'}`}
+              >
+                <LayoutDashboard className="h-4 w-4" /> Dashboard
+              </Link>
+              <Link
+                href="/staff/patients"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-3 text-sm font-medium ${isActive('/staff/patients') ? 'bg-teal-50 text-teal-700' : 'text-slate-700 hover:bg-slate-50'}`}
+              >
+                <Users className="h-4 w-4" /> Patients
+              </Link>
+              <Link
+                href="/staff/follow-up"
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-3 text-sm font-medium ${isActive('/staff/follow-up') ? 'bg-teal-50 text-teal-700' : 'text-slate-700 hover:bg-slate-50'}`}
+              >
+                <Repeat className="h-4 w-4" /> Follow-up
+              </Link>
+            </nav>
+            <div className="border-t border-slate-100 p-4">
+              <p className="mb-2 text-sm font-semibold text-slate-800">{user.name}</p>
+              <p className="mb-3 text-[11px] capitalize text-slate-400">{user.role.replace(/([A-Z])/g, ' $1')}</p>
+              <button
+                onClick={logout}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-red-600"
+              >
+                <LogOut className="h-4 w-4" /> Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="mx-auto max-w-6xl px-4 py-6">
         <h1 className="mb-5 text-xl font-bold text-slate-900">{titleFor(pathname)}</h1>

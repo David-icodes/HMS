@@ -3,7 +3,6 @@ import { Metadata } from 'next';
 import {
   Phone,
   CalendarCheck,
-  Ticket,
   Ambulance,
   ShieldCheck,
   HeartPulse,
@@ -90,7 +89,7 @@ export default async function HomePage() {
       <section className="relative z-10 -mt-14">
         <div className="container-site">
           <Reveal>
-            <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-soft sm:grid-cols-3">
+            <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-soft sm:grid-cols-2">
               <Link
                 href="/book-appointment"
                 className="group flex items-center gap-4 rounded-2xl bg-gradient-to-r from-brand-700 to-brand-600 p-4 text-white transition-all hover:shadow-glow"
@@ -101,18 +100,6 @@ export default async function HomePage() {
                 <span>
                   <span className="block text-sm font-bold">Book Appointment</span>
                   <span className="block text-xs text-brand-100">Online in under 2 minutes</span>
-                </span>
-              </Link>
-              <Link
-                href="/op-registration"
-                className="group flex items-center gap-4 rounded-2xl bg-white p-4 text-navy-900 shadow-sm transition-all hover:bg-brand-50"
-              >
-                <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-med-50 text-med-700">
-                  <Ticket className="h-6 w-6" />
-                </span>
-                <span>
-                  <span className="block text-sm font-bold">OP Registration</span>
-                  <span className="block text-xs text-slate-500">Skip the queue at front desk</span>
                 </span>
               </Link>
               <a

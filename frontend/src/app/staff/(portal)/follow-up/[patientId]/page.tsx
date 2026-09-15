@@ -144,7 +144,7 @@ export default function PatientCoursesPage() {
                   <Stat label="Start Date" value={new Date(c.startDate).toLocaleDateString('en-IN')} />
                 </div>
 
-                <div className="mt-3 overflow-hidden rounded-lg border border-slate-100">
+                <div className="mt-3 overflow-x-auto rounded-lg border border-slate-100">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-50">
                       <tr className="text-[10px] uppercase tracking-wider text-slate-500">

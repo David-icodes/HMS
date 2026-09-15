@@ -35,7 +35,7 @@ const ROLE_OPTIONS = [
 
 export default function AdminUsersPage() {
   const { user } = useAuth();
-  const isSuperAdmin = user?.role === 'superAdmin';
+  const canManageUsers = user?.role === 'superAdmin' || user?.role === 'admin';
 
   const [tab, setTab] = useState<'users' | 'activity' | 'attendance'>('users');
   const [rows, setRows] = useState<UserRow[]>([]);
@@ -120,7 +120,7 @@ export default function AdminUsersPage() {
             Refresh
           </button>
         </div>
-        {isSuperAdmin && (
+        {canManageUsers && (
           <button
             onClick={() => setDialog({ open: true, editing: null })}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700"
@@ -142,7 +142,7 @@ export default function AdminUsersPage() {
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Role</th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Last login</th>
-                {isSuperAdmin && <th className="w-28 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Actions</th>}
+                {canManageUsers && <th className="w-28 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -167,7 +167,7 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3 text-sm text-slate-500">
                     {r.lastLoginAt ? new Date(r.lastLoginAt).toLocaleString() : '—'}
                   </td>
-                  {isSuperAdmin && (
+                  {canManageUsers && (
                     <td className="whitespace-nowrap px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-1">
                         <button
@@ -225,7 +225,7 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      {dialog.open && isSuperAdmin && (
+      {dialog.open && canManageUsers && (
         <UserFormDialog
           editing={dialog.editing}
           onClose={() => setDialog({ open: false, editing: null })}

@@ -254,7 +254,6 @@ export default function StaffPatients() {
             <tr className="text-[10px] uppercase tracking-wider text-slate-500">
               <th className="px-3 py-2.5 font-semibold">S.No</th>
               <th className="px-3 py-2.5 font-semibold">Encounter Date</th>
-              <th className="px-3 py-2.5 font-semibold">Type</th>
               <th className="px-3 py-2.5 font-semibold">OP No.</th>
               <th className="px-3 py-2.5 font-semibold">UHID</th>
               <th className="px-3 py-2.5 font-semibold">Patient</th>
@@ -271,18 +270,18 @@ export default function StaffPatients() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={13} className="px-4 py-12 text-center text-slate-400">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
                   <p className="mt-2">Loading patient activity...</p>
                 </td>
               </tr>
             ) : error ? (
               <tr>
-                <td colSpan={14} className="px-4 py-12 text-center text-red-500">{error}</td>
+                <td colSpan={13} className="px-4 py-12 text-center text-red-500">{error}</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={13} className="px-4 py-12 text-center text-slate-400">
                   No patient activity found.
                 </td>
               </tr>
@@ -295,11 +294,6 @@ export default function StaffPatients() {
                 >
                   <td className="px-3 py-2.5 text-slate-500">{(page - 1) * 25 + i + 1}</td>
                   <td className="px-3 py-2.5 text-slate-700">{formatDate(r.encounterDate)}</td>
-                  <td className="px-3 py-2.5">
-                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${r.kind === 'registration' ? 'bg-slate-100 text-slate-500' : r.visitType === 'New OP' ? 'bg-teal-50 text-teal-700' : 'bg-indigo-50 text-indigo-600'}`}>
-                      {r.kind === 'registration' ? 'Reg' : r.visitType}
-                    </span>
-                  </td>
                   <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{r.opNumber || '—'}</td>
                   <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{r.uhid || '—'}</td>
                   <td className="px-3 py-2.5 font-medium text-slate-800">

@@ -193,7 +193,7 @@ export default function InvoicePage() {
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Line items</p>
             {items.map((it, i) => (
-              <div key={i} className="grid grid-cols-[1fr_70px_90px_36px] items-center gap-2">
+              <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_36px] sm:items-center">
                 <input
                   value={it.description}
                   onChange={(e) => updateItem(i, 'description', e.target.value)}
@@ -234,7 +234,7 @@ export default function InvoicePage() {
             </button>
           </div>
 
-          <div className="mt-5 grid grid-cols-3 gap-3">
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">Discount (₹)</label>
               <input
@@ -387,7 +387,7 @@ function InvoiceSheet({ invoice }: { invoice: Invoice }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6 py-5 text-sm">
+      <div className="grid grid-cols-1 gap-6 py-5 text-sm sm:grid-cols-2">
         <div>
           <p className="text-xs uppercase tracking-wider text-slate-400">Billed To</p>
           <p className="mt-1 font-semibold text-slate-800">{invoice.patientName}</p>
@@ -427,7 +427,7 @@ function InvoiceSheet({ invoice }: { invoice: Invoice }) {
       </table>
 
       <div className="mt-5 flex justify-end">
-        <div className="w-56 space-y-1.5 text-sm">
+        <div className="w-full max-w-56 space-y-1.5 text-sm">
           <SummaryRow label="Subtotal" value={invoice.subtotal} />
           {invoice.discount > 0 && <SummaryRow label="Discount" value={-invoice.discount} />}
           {invoice.tax > 0 && <SummaryRow label="Tax" value={invoice.tax} />}
